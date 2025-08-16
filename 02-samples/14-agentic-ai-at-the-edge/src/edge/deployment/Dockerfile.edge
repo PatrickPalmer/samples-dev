@@ -1,0 +1,197 @@
+# Dockerfile.edge - Multi-Architecture Edge Container for Personal Assistant
+# Supports x86_64, ARM64, and Qualcomm Snapdragon with hardware acceleration
+
+# Build arguments for architecture detection
+# These will be auto-populated by Docker buildx
+ARG TARGETARCH
+ARG BUILDARCH
+
+# Base image selection based on architecture
+FROM --platform=linux/${TARGETARCH} python:3.13-slim as base
+
+# Install system dependencies with architecture-specific optimizations
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    wget \
+    curl \
+    portaudio19-dev \
+    libsndfile1-dev \
+    # ARM/Qualcomm specific dependencies
+    $(if [ "$TARGETARCH" = "arm64" ]; then echo "ocl-icd-opencl-dev opencl-headers clinfo libomp-dev"; fi) \
+    && rm -rf /var/lib/apt/lists/*
+
+# ===================================
+# BUILDER STAGE - Architecture-aware compilation
+# ===================================
+FROM base as builder
+
+# Architecture-specific build configuration
+ARG TARGETARCH
+ENV TARGETARCH=${TARGETARCH}
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    libopenblas-dev \
+    pkg-config \
+    ninja-build \
+    libcurl4-openssl-dev \
+    $(if [ "$TARGETARCH" = "arm64" ]; then echo "libomp-dev"; fi) \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone and build whisper.cpp first
+WORKDIR /build
+RUN git clone https://github.com/ggml-org/whisper.cpp && \
+    cd whisper.cpp && \
+    mkdir build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build . --config Release -j $(nproc) && \
+    # Install whisper libraries and headers
+    cp src/libwhisper.so* /usr/local/lib/ && \
+    cp -r ../include/* /usr/local/include/ && \
+    cp -r ../ggml/include/* /usr/local/include/ && \
+    cp ggml/src/*.so* /usr/local/lib/ && \
+    ldconfig && \
+    # Create pkg-config file for whisper
+    mkdir -p /usr/local/lib/pkgconfig && \
+    echo 'prefix=/usr/local' > /usr/local/lib/pkgconfig/whisper.pc && \
+    echo 'exec_prefix=${prefix}' >> /usr/local/lib/pkgconfig/whisper.pc && \
+    echo 'libdir=${prefix}/lib' >> /usr/local/lib/pkgconfig/whisper.pc && \
+    echo 'includedir=${prefix}/include' >> /usr/local/lib/pkgconfig/whisper.pc && \
+    echo '' >> /usr/local/lib/pkgconfig/whisper.pc && \
+    echo 'Name: whisper' >> /usr/local/lib/pkgconfig/whisper.pc && \
+    echo 'Description: OpenAI Whisper ASR' >> /usr/local/lib/pkgconfig/whisper.pc && \
+    echo 'Version: 1.7.6' >> /usr/local/lib/pkgconfig/whisper.pc && \
+    echo 'Libs: -L${libdir} -lwhisper -lggml' >> /usr/local/lib/pkgconfig/whisper.pc && \
+    echo 'Cflags: -I${includedir}' >> /usr/local/lib/pkgconfig/whisper.pc
+
+# Build FFmpeg with Whisper support
+RUN git clone https://github.com/FFmpeg/FFmpeg.git ffmpeg && \
+    cd ffmpeg && \
+    PKG_CONFIG_PATH=/usr/local/lib/pkgconfig ./configure \
+        --prefix=/usr/local \
+        --enable-whisper \
+        --enable-gpl \
+        --enable-version3 \
+        --disable-doc \
+        --disable-debug && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig
+
+# Clone and build llama.cpp from source with server
+RUN git clone https://github.com/ggml-org/llama.cpp && \
+    cd llama.cpp && \
+    mkdir build && \
+    cd build && \
+    # Configure with server support enabled
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLLAMA_BUILD_SERVER=ON \
+        -DGGML_BLAS=ON \
+        -DGGML_BLAS_VENDOR=OpenBLAS \
+        -DGGML_NATIVE=OFF \
+        -DLLAMA_CURL=ON \
+        $(if [ "$TARGETARCH" = "arm64" ]; then echo "-DGGML_OPENMP=ON"; fi) && \
+    # Build specifically the server target
+    cmake --build . --config Release --target llama-server -j $(nproc) && \
+    # Verify server binary was built (check both possible locations)
+    (test -f bin/llama-server || test -f tools/server/llama-server) && \
+    echo "✅ llama-server binary built successfully" && \
+    # Copy the server binary and required libraries to system location
+    if [ -f bin/llama-server ]; then \
+        cp bin/llama-server /usr/local/bin/llama-server; \
+        # Also copy shared libraries if they exist
+        cp bin/*.so /usr/local/lib/ 2>/dev/null || true; \
+        cp src/*.so /usr/local/lib/ 2>/dev/null || true; \
+        cp ggml/src/*.so /usr/local/lib/ 2>/dev/null || true; \
+        cp common/*.so /usr/local/lib/ 2>/dev/null || true; \
+        cp tools/mtmd/*.so /usr/local/lib/ 2>/dev/null || true; \
+    else \
+        cp tools/server/llama-server /usr/local/bin/llama-server; \
+    fi && \
+    chmod +x /usr/local/bin/llama-server && \
+    ldconfig && \
+    # Test that it runs
+    /usr/local/bin/llama-server --version || /usr/local/bin/llama-server --help | head -5
+
+# Install Python dependencies from pyproject.toml
+# We need to copy src directory structure for pyproject.toml to work
+COPY pyproject.toml /tmp/pyproject.toml
+COPY src /tmp/src
+COPY README.md /tmp/README.md
+# Install dependencies - handle version conflicts by installing in order
+RUN cd /tmp && \
+    pip install --no-cache-dir . && \
+    pip install --no-cache-dir pillow dill prompt_toolkit pyjwt slack_bolt tenacity && \
+    pip install --no-cache-dir --upgrade --no-deps strands-agents-tools && \
+    pip install --no-cache-dir --force-reinstall "strands-agents @ git+https://github.com/westonbrown/sdk-python.git@main"
+
+# ===================================  
+# RUNTIME STAGE - Multi-architecture runtime
+# ===================================
+FROM --platform=linux/${TARGETARCH} python:3.13-slim as runtime
+
+ARG TARGETARCH
+ENV TARGETARCH=${TARGETARCH}
+
+# Install runtime dependencies (FFmpeg built from source with Whisper)
+RUN apt-get update && apt-get install -y \
+    libopenblas0 \
+    libgomp1 \
+    wget \
+    curl \
+    pulseaudio \
+    $(if [ "$TARGETARCH" = "arm64" ]; then echo "ocl-icd-libopencl1 libomp5"; fi) \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Python packages from builder
+COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
+# Copy all binaries including llama-server
+COPY --from=builder /usr/local/bin /usr/local/bin
+# Copy shared libraries for llama-server
+COPY --from=builder /usr/local/lib/*.so /usr/local/lib/
+RUN ldconfig
+
+# Create app directory structure
+WORKDIR /app
+RUN mkdir -p /app/models /app/data /app/logs /app/tools
+
+# Create non-root user for security
+RUN useradd -m -u 1001 -s /bin/bash agent && \
+    chown -R agent:agent /app
+USER agent
+
+# Copy application code (unified structure)
+COPY --chown=agent:agent src/edge/model_downloader.py /app/
+COPY --chown=agent:agent src/edge/startup.sh /app/
+COPY --chown=agent:agent . /app/
+# Main.py is now at /app/main.py
+# All src/ content is at /app/src/
+
+# Make startup script executable
+USER root
+RUN chmod +x /app/startup.sh
+USER agent
+
+# Python configuration (always needed)
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+# Model configuration comes from docker run -e flags (from .env)
+
+# Performance configuration comes from docker run -e flags (from .env)
+# ARM/Qualcomm OpenCL configuration (ignored on x86)
+ENV OCL_ICD_VENDORS=/etc/OpenCL/vendors
+ENV GGML_OPENCL_DEVICE=0
+ENV GGML_OPENCL_PLATFORM=0
+
+# Health check with longer startup period for model download
+HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=5 \
+    CMD python -c "import requests; requests.get('http://localhost:8080/health', timeout=5)" || exit 1
+
+# Expose ports for llama.cpp server and optional API
+EXPOSE 8080 8000
+
+# Use startup script for initialization
+CMD ["/app/startup.sh"]

@@ -1,0 +1,141 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Environments
+.env
+.env.local
+.env.*.local
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Models and large files
+*.gguf
+*.bin
+*.safetensors
+models/
+!models/.gitkeep
+
+# Data files
+*.db
+*.sqlite
+*.sqlite3
+appointments.db
+
+# Audio files
+audio_exchange/
+*.wav
+*.mp3
+*.flac
+*.ogg
+
+# FAISS indices
+*.index
+*.npy
+embeddings.npy
+vehicle.index
+
+# Model cache (downloaded models)
+model_cache/
+**/model_cache/
+.locks/
+
+# Logs
+logs/
+*.log
+
+# Docker
+.dockerignore
+
+# Edge deployment artifacts
+src/edge/deployment/models/
+src/edge/deployment/data/
+src/edge/deployment/logs/
+src/edge/deployment/audio_exchange/
+
+# Jupyter
+.ipynb_checkpoints/
+*-checkpoint.ipynb
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Build artifacts
+src/agentic_ai_edge.egg-info/
+
+# Security and credentials
+*.pem
+*.key
+*.crt
+*.p12
+credentials/
+secrets/
+
+# AWS CLI configuration
+.aws/
+
+# Bearer tokens and API keys
+*bearer*.txt
+*token*.txt
+*api_key*.txt
+*secret*.txt
