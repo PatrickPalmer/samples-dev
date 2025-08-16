@@ -1,6 +1,6 @@
 # Agentic AI at the Edge
 
-An intelligent cockpit control system designed for edge deployment in vehicles, featuring voice input powered by FFmpeg-Whisper integration, dynamic model routing with Qwen3-1.7B from ![Hugging Face](https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-pirate.png) **Hugging Face**, and specialized agents for vehicle controls.
+An intelligent cockpit control system designed for edge deployment in resource constrained devices, featuring voice input powered by FFmpeg-Whisper integration, dynamic model routing with Qwen3-1.7B, and specialized agents for vehicle controls.
 
 ## Overview
 
@@ -155,83 +155,6 @@ python main.py
 ENABLE_API=true python main.py
 ```
 
-### Voice-Enabled Setup (Recommended)
-
-#### Model Selection
-The architecture uses **Qwen3-1.7B** from ![Hugging Face](https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-pirate.png) **Hugging Face** for superior edge AI performance:
-- **Advanced reasoning capabilities** with thinking/non-thinking mode switching
-- **1.7B parameters** optimized for edge deployment with 32K context length
-- **Superior instruction following** and agent capabilities
-- **Multilingual support** for 100+ languages and dialects
-- **Apache 2.0 license** for open source deployment
-
-Voice processing is handled separately by FFmpeg with integrated Whisper for optimal efficiency.
-
-1. **Download Qwen3-1.7B model from Hugging Face**:
-```bash
-mkdir -p models && cd models
-huggingface-cli download Qwen/Qwen3-1.7B-Instruct-GGUF qwen3-1.7b-instruct-q8_0.gguf --local-dir .
-huggingface-cli download ggerganov/whisper.cpp ggml-base.bin --local-dir .
-```
-
-2. **Start llama-server**:
-```bash
-llama-server -m qwen3-1.7b-instruct-q8_0.gguf \
-  --host 0.0.0.0 --port 8080 -c 32768 -ngl 50 --chat-template qwen3
-```
-
-3. **Run the assistant**:
-```bash
-python main.py
-```
-
-## Features
-
-### Specialized Agents
-
-- **Calendar Assistant**: Schedule and manage appointments with intelligent reasoning
-- **Search Assistant**: Advanced web research with Qwen3's superior language understanding
-- **Vehicle Assistant**: Offline car documentation with enhanced multilingual support
-
-### Voice Input Across All Modes
-
-The application provides unified voice input that works identically across all deployment modes:
-
-#### Development Mode
-```bash
-USER: voice
-[Microphone activates for 10 seconds]
-[Direct audio capture and processing]
-```
-
-#### Container Mode  
-```bash
-# Host machine:
-python -m src.utils.audio_cli record --duration 10
-
-# In container:
-USER: voice
-[Automatically detects and processes audio file]
-```
-
-#### API Mode
-```bash
-# Client application:
-python -m src.utils.audio_cli api --duration 10 --url http://localhost:8000/chat
-# Or integrate with your application using base64 audio in JSON
-```
-
-All modes support:
-- Automatic speech-to-text transcription with translation
-- Natural language understanding in multiple languages
-- Identical processing pipeline regardless of input method
-
-### Dynamic Model Selection
-- Analyzes query complexity automatically
-- Routes simple queries to local model
-- Complex queries go to cloud model (if configured)
-
-
 ## Edge Deployment Architecture
 
 ### The Power of Unified Codebase
@@ -282,23 +205,6 @@ curl -X POST http://localhost:8000/chat \
 }
 ```
 
-### Deployment Benefits
-
-| Aspect | Traditional Approach | Our Unified Approach |
-|--------|---------------------|---------------------|
-| Codebase | Multiple versions | Single main.py |
-| Maintenance | Update each version | Update once |
-| Testing | Test all versions | Test once |
-| Features | May diverge | Always in sync |
-| Deployment | Complex branching | Simple env vars |
-
-## Configuration
-
-Key settings in `src/config.py`:
-- `DEPLOYMENT_TARGET`: development, edge, or automotive
-- `MEMORY_LIMIT`: Memory constraints for edge devices
-- `USE_RICH_UI`: Enable/disable rich terminal UI
-
 ### Model Selection Logic
 
 ```mermaid
@@ -346,15 +252,6 @@ $ ENABLE_API=true python main.py
 
 # Each automatically adapts its behavior to the environment
 ```
-
-### Real Impact
-- **Faster Development**: Write features once, test once, deploy everywhere
-- **Consistent Behavior**: Users get the same AI capabilities regardless of deployment
-- **Simplified Maintenance**: Bug fixes and improvements automatically benefit all deployments
-- **True Edge AI**: Qwen3-1.7B delivers cloud-level reasoning capabilities offline in your vehicle
-- **Open Source Excellence**: Apache 2.0 licensed model from Hugging Face ensures sustainability
-
-This unified architecture with Qwen3 proves that edge AI doesn't mean compromised AI—it means intelligently adaptive AI with enterprise-grade reasoning capabilities.
 
 ## License
 
