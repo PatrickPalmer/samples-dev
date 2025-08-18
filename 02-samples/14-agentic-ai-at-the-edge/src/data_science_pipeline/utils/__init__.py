@@ -1,5 +1,5 @@
 """
-Utility functions for Qwen2.5-Omni fine-tuning pipeline
+Utility functions for Qwen3-1.7B fine-tuning pipeline with Strands SDK tool format
 """
 
 from .data_generator import DataGenerator, ToolRegistry

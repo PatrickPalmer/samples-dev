@@ -155,6 +155,86 @@ python main.py
 ENABLE_API=true python main.py
 ```
 
+<<<<<<< HEAD
+=======
+### Voice-Enabled Setup (Recommended)
+
+#### Model Selection
+The architecture uses Qwen3-1.7B for edge AI performance:
+- Advanced reasoning capabilities with structured output generation
+- 1.7B parameters optimized for edge deployment with extended context support
+- Strong instruction following and agent capabilities
+- Multilingual support for global deployment
+- Open source compatible licensing
+
+Voice processing is handled separately by FFmpeg with integrated Whisper for optimal efficiency.
+
+1. **Download Qwen3-1.7B model**:
+```bash
+mkdir -p models && cd models
+huggingface-cli download Qwen/Qwen3-1.7B-Instruct-GGUF qwen3-1.7b-instruct-q8_0.gguf --local-dir .
+huggingface-cli download ggerganov/whisper.cpp ggml-base.bin --local-dir .
+```
+
+2. **Start llama-server**:
+```bash
+llama-server -m qwen3-1.7b-instruct-q8_0.gguf \
+  --host 0.0.0.0 --port 8080 -c 32768 -ngl 50 --chat-template qwen3
+```
+
+3. **Run the assistant**:
+```bash
+python main.py
+```
+
+## Features
+
+### Specialized Agents
+
+- **Calendar Assistant**: Schedule and manage appointments with intelligent reasoning
+- **Search Assistant**: Advanced web research with Qwen3's superior language understanding
+- **Vehicle Assistant**: Offline car documentation with enhanced multilingual support
+
+### Voice Input Across All Modes
+
+The application provides unified voice input that works identically across all deployment modes:
+
+#### Development Mode
+```bash
+USER: voice
+[Microphone activates for 10 seconds]
+[Direct audio capture and processing]
+```
+
+#### Container Mode  
+```bash
+# Host machine:
+python -m src.utils.audio_cli record --duration 10
+
+# In container:
+USER: voice
+[Automatically detects and processes audio file]
+```
+
+#### API Mode
+```bash
+# Client application:
+python -m src.utils.audio_cli api --duration 10 --url http://localhost:8000/chat
+# Or integrate with your application using base64 audio in JSON
+```
+
+All modes support:
+- Automatic speech-to-text transcription with translation
+- Natural language understanding in multiple languages
+- Identical processing pipeline regardless of input method
+
+### Dynamic Model Selection
+- Analyzes query complexity automatically
+- Routes simple queries to local model
+- Complex queries go to cloud model (if configured)
+
+
+>>>>>>> 546ccc4 (data science pipeline refinement; qwen3 1.7b; whishper integration;)
 ## Edge Deployment Architecture
 
 ### The Power of Unified Codebase
@@ -232,10 +312,10 @@ python test_all.py
 This project demonstrates that sophisticated AI systems don't require separate codebases for different deployment targets. By designing with deployment flexibility in mind, we achieve:
 
 ### Single Source of Truth
-- **One `main.py`** serves all deployment scenarios
-- **One set of agents** works everywhere  
-- **One audio system** adapts to available inputs
-- **One configuration** responds to environment
+- One `main.py` serves all deployment scenarios
+- One set of agents works everywhere  
+- One audio system adapts to available inputs
+- One configuration responds to environment
 
 ### Deployment Flexibility
 ```python
@@ -253,6 +333,18 @@ $ ENABLE_API=true python main.py
 # Each automatically adapts its behavior to the environment
 ```
 
+<<<<<<< HEAD
+=======
+### Real Impact
+- Faster Development: Write features once, test once, deploy everywhere
+- Consistent Behavior: Users get the same AI capabilities regardless of deployment
+- Simplified Maintenance: Bug fixes and improvements automatically benefit all deployments
+- True Edge AI: Qwen3-1.7B delivers advanced reasoning capabilities offline
+- Sustainable Architecture: Open source model ensures long-term viability
+
+This unified architecture demonstrates that edge AI can deliver enterprise-grade reasoning capabilities through intelligent adaptation to deployment environments.
+
+>>>>>>> 546ccc4 (data science pipeline refinement; qwen3 1.7b; whishper integration;)
 ## License
 
 This project is part of the Strands SDK samples collection.

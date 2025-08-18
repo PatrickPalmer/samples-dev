@@ -1,5 +1,5 @@
 """
-Training utilities for Qwen2.5-Omni fine-tuning
+Training utilities for Qwen3-1.7B fine-tuning with Strands SDK tool format
 """
 
 from dataclasses import dataclass
@@ -13,7 +13,7 @@ class TrainingConfig:
     """Configuration for model training"""
 
     # Model configuration
-    model_name: str = "Qwen/Qwen2.5-Omni-7B"
+    model_name: str = "Qwen/Qwen3-1.7B-Instruct"
     max_seq_length: int = 2048
     load_in_4bit: bool = True
 
@@ -71,7 +71,7 @@ class TrainingConfig:
 
 
 class ModelTrainer:
-    """Trainer for Qwen2.5-Omni model"""
+    """Trainer for Qwen3-1.7B model with Strands SDK tool calling"""
 
     def __init__(self, config: TrainingConfig):
         self.config = config

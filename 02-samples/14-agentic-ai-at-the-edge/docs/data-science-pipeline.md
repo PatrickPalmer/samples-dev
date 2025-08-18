@@ -2,7 +2,7 @@
 
 ## Overview
 
-Fine-tuning pipeline for Qwen2.5-Omni-7B that improves tool calling accuracy from 42% to 97% through targeted training on synthetic conversations. Optimized for edge deployment with 4-bit quantization.
+Fine-tuning pipeline for Qwen3-1.7B that improves tool calling accuracy targeted training on synthetic conversations. Optimized for edge deployment with 4-bit quantization.
 
 ## Architecture Flow
 
@@ -159,7 +159,7 @@ Key hyperparameters that control model adaptation:
 
 ```python
 TrainingConfig(
-    model_name="Qwen/Qwen2.5-7B-Instruct",
+    model_name="Qwen/Qwen3-1.7B-Instruct",
     max_seq_length=2048,        # Context window for training
     load_in_4bit=True,          # Enables training on 14GB GPUs
     lora_r=16,                  # LoRA rank - lower=faster, higher=more capacity
@@ -179,7 +179,7 @@ TrainingConfig(
 
 ### 3. Quantization Process
 
-Quantization reduces model size from 14GB to 4.7GB while maintaining 98% of performance. The process uses k-means clustering to group similar weights, then stores centroids + indices.
+Quantization reduces model size from while maintaining of performance. The process uses k-means clustering to group similar weights, then stores centroids + indices.
 
 ```python
 QuantizationConfig(
@@ -192,7 +192,7 @@ QuantizationConfig(
 **Quantization Methods:**
 - `q4_k_m`: 4-bit with k-means clustering. Best quality/size ratio.
 - `q4_0`: Faster but lower quality. Use for testing.
-- `q8_0`: 8-bit for minimal quality loss. Results in 7GB model.
+- `q8_0`: 8-bit for minimal quality loss. Results in 1.8GB model.
 
 **Process Steps:**
 1. Groups FP16 weights into clusters using k-means (k=16 for 4-bit)
@@ -246,13 +246,13 @@ ToolSpec(
 ## Hardware Requirements
 
 **Training:**
-- GPU: 14GB+ VRAM (RTX 3090/4070 Ti)
-- RAM: 32GB
-- Storage: 100GB
+- GPU: 8GB+ VRAM (RTX 3060/4060)
+- RAM: 16GB
+- Storage: 20GB
 
 **Inference:**
-- RAM: 8GB
-- Storage: 5GB
+- RAM: 4GB
+- Storage: 2GB
 
 ## Deployment
 

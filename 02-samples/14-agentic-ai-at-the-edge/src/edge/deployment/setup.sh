@@ -250,7 +250,7 @@ start_assistant() {
         -e GGML_NTHREADS="${GGML_NTHREADS}" \
         -e OMP_NUM_THREADS="${OMP_NUM_THREADS}" \
         -e LLAMA_THREADS_HTTP="${LLAMA_THREADS_HTTP:-8}" \
-        --memory=5g \
+        --memory=4g \
         --cpus=8.0 \
         personal-assistant:edge
     

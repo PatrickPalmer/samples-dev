@@ -114,64 +114,6 @@ class ToolRegistry:
             # Model Selection Tool
             "select_model": ToolSpec(
                 name="select_model",
-                description="Select appropriate model based on query complexity",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "User query to analyze"}
-                    },
-                    "required": ["query"],
-                },
-            ),
-            # Multimodal Tools
-            "analyze_image": ToolSpec(
-                name="analyze_image",
-                description="Analyze image content using strands_tools.image_reader",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "image_query": {
-                            "type": "string",
-                            "description": "Optional query about the image",
-                        }
-                    },
-                    "required": [],
-                },
-            ),
-            "voice_input": ToolSpec(
-                name="voice_input",
-                description="Capture, transcribe, and process voice input using audio-capable models",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "duration": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 10,
-                            "default": 5,
-                            "description": "Recording duration in seconds",
-                        },
-                        "audio_file": {
-                            "type": "string",
-                            "description": "Path to audio file (optional)",
-                        },
-                        "audio_bytes": {
-                            "type": "string",
-                            "description": "Pre-recorded audio bytes (optional)",
-                        },
-                        "audio_format": {
-                            "type": "string",
-                            "enum": ["wav", "mp3", "ogg"],
-                            "default": "wav",
-                            "description": "Audio format",
-                        },
-                    },
-                    "required": [],
-                },
-            ),
-            # Utility Tools
-            "select_model": ToolSpec(
-                name="select_model",
                 description="Intelligently select between local and remote models based on query complexity",
                 parameters={
                     "type": "object",
@@ -186,67 +128,6 @@ class ToolRegistry:
                 },
             ),
         }
-
-        # Add calendar sub-tools used by calendar_assistant
-        calendar_tools = {
-            "create_appointment": ToolSpec(
-                name="create_appointment",
-                description="Create a new calendar appointment",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "date": {"type": "string", "description": "Appointment date"},
-                        "title": {"type": "string", "description": "Appointment title"},
-                        "location": {"type": "string", "description": "Appointment location"},
-                        "description": {"type": "string", "description": "Appointment description"},
-                    },
-                    "required": ["date", "title", "location", "description"],
-                },
-            ),
-            "list_appointments": ToolSpec(
-                name="list_appointments",
-                description="List calendar appointments with optional date filter",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "date_filter": {"type": "string", "description": "Optional date filter"}
-                    },
-                    "required": [],
-                },
-            ),
-            "get_agenda": ToolSpec(
-                name="get_agenda",
-                description="Get agenda for a specific date",
-                parameters={
-                    "type": "object",
-                    "properties": {"date": {"type": "string", "description": "Date for agenda"}},
-                    "required": ["date"],
-                },
-            ),
-            "update_appointment": ToolSpec(
-                name="update_appointment",
-                description="Update an existing appointment",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "appointment_id": {
-                            "type": "string",
-                            "description": "Appointment ID to update",
-                        },
-                        "date": {"type": "string", "description": "New date (optional)"},
-                        "location": {"type": "string", "description": "New location (optional)"},
-                        "title": {"type": "string", "description": "New title (optional)"},
-                        "description": {
-                            "type": "string",
-                            "description": "New description (optional)",
-                        },
-                    },
-                    "required": ["appointment_id"],
-                },
-            ),
-        }
-
-        tools.update(calendar_tools)
 
         return tools
 

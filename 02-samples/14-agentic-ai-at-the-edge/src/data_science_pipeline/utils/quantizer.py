@@ -79,7 +79,7 @@ class ModelQuantizer:
 
         return True
 
-    def convert_to_gguf(self, model_path: str, output_path: str, model_type: str = "qwen2") -> bool:
+    def convert_to_gguf(self, model_path: str, output_path: str, model_type: str = "qwen3") -> bool:
         """Convert HuggingFace model to GGUF format"""
 
         if not self.check_dependencies():
@@ -168,7 +168,7 @@ class ModelQuantizer:
         return str(output_path)
 
     def full_pipeline(
-        self, model_path: str, output_dir: str, model_name: str = "qwen2.5-omni-7b-finetuned"
+        self, model_path: str, output_dir: str, model_name: str = "qwen3-1.7b-finetuned"
     ) -> Dict[str, str]:
         """Run complete quantization pipeline"""
 

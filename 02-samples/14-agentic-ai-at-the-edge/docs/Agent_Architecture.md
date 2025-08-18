@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the multi-agent architecture designed for edge-deployed automotive AI systems powered by **Qwen3-1.7B** from ![Hugging Face](https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-pirate.png) **Hugging Face**. The architecture emphasizes modularity, safety, and efficient resource utilization while maintaining offline capabilities with advanced reasoning through thinking/non-thinking mode switching.
+This document describes the multi-agent architecture designed for edge-deployed automotive AI systems powered by Qwen3-1.7B. The architecture emphasizes modularity, safety, and efficient resource utilization while maintaining offline capabilities with advanced reasoning.
 
 ## System Architecture
 
@@ -70,22 +70,22 @@ graph TB
 
 ### Qwen3-1.7B Capabilities
 
-The system leverages **Qwen3-1.7B** from Hugging Face for advanced AI reasoning:
+The system leverages Qwen3-1.7B for advanced AI reasoning:
 
 | Feature | Capability | Benefit |
 |---------|------------|----------|
-| Thinking Mode | Complex reasoning with <think> blocks | Superior problem-solving for vehicle diagnostics |
-| 32K Context | Extended conversation memory | Maintains context across long interactions |
-| Multilingual | 100+ languages support | Global vehicle deployment capabilities |
-| Apache 2.0 | Open source licensing | Enterprise-friendly deployment |
+| Structured Output | Complex reasoning with structured generation | Enhanced problem-solving for vehicle diagnostics |
+| Extended Context | Large conversation memory | Maintains context across long interactions |
+| Multilingual | Multiple language support | Global vehicle deployment capabilities |
+| Open Source | Compatible licensing | Enterprise-friendly deployment |
 | Edge Optimized | 1.7B parameters | Efficient inference on automotive hardware |
 
 ### 1. Orchestration Layer
 
 | Component | Purpose | Key Features |
 |-----------|---------|--------------|
-| Main Orchestrator | Routes user requests to appropriate agents | Qwen3 advanced reasoning, 32K context management, Multi-turn conversation support |
-| Model Selector | Dynamically chooses between Qwen3 local and cloud models | Query complexity analysis, Resource-aware routing, Thinking mode activation |
+| Main Orchestrator | Routes user requests to appropriate agents | Qwen3 advanced reasoning, Extended context management, Multi-turn conversation support |
+| Model Selector | Dynamically chooses between Qwen3 local and cloud models | Query complexity analysis, Resource-aware routing, Adaptive processing |
 
 ### 2. Agent Categories
 
@@ -105,7 +105,7 @@ Knowledge retrieval and documentation access.
 
 | Agent | Data Source | Capabilities |
 |-------|------------|--------------|
-| Vehicle Assistant | FAISS vector database | Offline manual search with multilingual support, Advanced troubleshooting with Qwen3 reasoning, Intelligent maintenance scheduling |
+| Vehicle Assistant | FAISS vector database | Offline manual search, Advanced troubleshooting with Qwen3 reasoning, Intelligent maintenance scheduling |
 
 #### Productivity Agents
 Task and schedule management.
@@ -219,17 +219,17 @@ def agent_function(command: str) -> str:
 
 | Aspect | Strategy | Impact |
 |--------|----------|--------|
-| Memory | Qwen3 1.7B model optimization | 2-4GB total usage |
-| CPU | Async processing with thinking mode | <10% idle usage |
+| Memory | Qwen3-1.7B model optimization | 2-4GB total usage |
+| CPU | Asynchronous processing | <10% idle usage |
 | Storage | Pre-built FAISS indices + Qwen3 | 2.2GB model + 50MB vector store |
-| Latency | Qwen3 local inference | <500ms complex reasoning |
+| Latency | Qwen3 local inference | <500ms response time |
 
 ### Scaling Strategies
 
 - **Horizontal**: Multiple agent instances for parallel processing
 - **Vertical**: Dynamic resource allocation based on load
 - **Edge-First**: Qwen3 offline capabilities with cloud fallback
-- **Thinking Mode**: Automatic complexity detection for optimal processing
+- **Adaptive Processing**: Automatic complexity detection for optimal resource use
 
 ## Testing Framework
 
@@ -249,21 +249,3 @@ pytest tests/test_cockpit_controls.py -m unit
 pytest tests/test_integration.py -m integration
 pytest tests/test_safety.py -m safety
 ```
-
-## Future Extensions
-
-### Planned Enhancements
-
-1. **Predictive Maintenance**: ML-based failure prediction
-2. **Adaptive Personalization**: Driver preference learning
-3. **Multi-Vehicle Support**: Fleet management capabilities
-4. **Enhanced Safety**: Computer vision integration
-5. **Energy Optimization**: Battery management for EVs
-
-### Integration Points
-
-- OBD-II diagnostic interface
-- Telematics data streams
-- Cloud synchronization
-- Mobile app connectivity
-- Third-party service APIs
