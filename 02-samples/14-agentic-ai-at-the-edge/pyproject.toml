@@ -103,9 +103,43 @@ ml = [
     "sentence-transformers>=2.2.0,<3.0.0",  # Text embeddings
 ]
 
+asr = [
+    # ASR Fine-tuning Dependencies
+    "datasets==2.18.0",          # For Common Voice dataset loading
+    "transformers==4.36.0",      # Whisper model support
+    "accelerate==0.25.0",        # Training optimization
+    "evaluate==0.4.1",           # Metrics computation
+    "jiwer==3.0.3",             # WER/CER calculation
+    "peft==0.7.1",              # LoRA implementation
+    "librosa==0.10.1",          # Audio processing
+    "soundfile==0.12.1",        # Audio I/O (required for Common Voice)
+    "audioread>=3.0.0",         # Alternative audio decoder for MP3
+    "pydub>=0.25.0",            # Audio format conversion
+    "tensorboard>=2.14.0",      # Training visualization
+    "matplotlib>=3.7.0",        # Plotting results
+    "torch>=2.0.0",             # PyTorch (required by transformers)
+    "torchaudio>=2.0.0",        # Audio processing for PyTorch
+]
+
+function-calling = [
+    # Function Calling Fine-tuning Dependencies for Qwen3
+    "torch>=2.2.0",                         # PyTorch for model training
+    "transformers>=4.44.0",                 # HuggingFace transformers
+    "datasets>=3.0.0",                      # HuggingFace datasets
+    "accelerate>=0.27.0",                   # Training acceleration
+    "peft>=0.12.0",                         # LoRA and parameter-efficient fine-tuning
+    "trl>=0.10.0",                          # Transformer Reinforcement Learning
+    "bitsandbytes>=0.43.0",                 # 4-bit/8-bit quantization
+    "boto3>=1.28.0",                        # AWS SDK for Bedrock data generation
+    "matplotlib>=3.7.0",                    # Visualization
+    "pandas>=2.0.0",                        # Data analysis
+    "unsloth_zoo>=2025.8.1",                # Unsloth zoo required dependency
+    "unsloth @ git+https://github.com/unslothai/unsloth.git",  # Optimized training
+]
+
 all = [
     # Install all optional dependencies
-    "agentic-ai-edge[dev,audio,edge,ml]",
+    "agentic-ai-edge[dev,audio,edge,ml,asr,function-calling]",
 ]
 
 [project.scripts]
