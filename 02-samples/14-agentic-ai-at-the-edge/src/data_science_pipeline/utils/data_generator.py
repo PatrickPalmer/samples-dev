@@ -17,9 +17,11 @@ import random
 import uuid
 import boto3
 import os
+import time
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from pathlib import Path
+from botocore.exceptions import ClientError
 
 
 # Configuration constants
@@ -27,6 +29,13 @@ DEFAULT_MODEL_ID = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
 DEFAULT_REGION = "us-east-1"
 DEFAULT_MAX_TOKENS = 1000
 DEFAULT_TEMPERATURE = 0.7
+
+# Rate limiting configuration
+RATE_LIMIT_DELAY = 1.0  # Base delay between requests in seconds
+MAX_RETRIES = 5  # Maximum number of retries for rate-limited requests
+BACKOFF_FACTOR = 2.0  # Exponential backoff multiplier
+BATCH_SIZE = 10  # Process in batches with delays
+BATCH_DELAY = 5.0  # Delay between batches in seconds
 
 
 @dataclass
@@ -52,13 +61,13 @@ class ToolRegistry:
         self.tools = self._initialize_tools()
 
     def _initialize_tools(self) -> Dict[str, ToolSpec]:
-        """Initialize tool specifications matching actual implementation"""
+        """Initialize ONLY the 5 production cockpit control tools"""
 
         tools = {
-            # Cockpit Control Tools - All take a 'command' string parameter
+            # PRODUCTION TOOLS ONLY - All take a 'command' string parameter
             "climate_control": ToolSpec(
                 name="climate_control",
-                description="Control vehicle climate settings",
+                description="Control vehicle climate settings including temperature, fan speed, and AC",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -69,7 +78,7 @@ class ToolRegistry:
             ),
             "window_control": ToolSpec(
                 name="window_control",
-                description="Control vehicle windows",
+                description="Control vehicle windows position",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -80,7 +89,7 @@ class ToolRegistry:
             ),
             "seat_control": ToolSpec(
                 name="seat_control",
-                description="Control vehicle seat settings",
+                description="Control vehicle seat position and heating/cooling",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -91,7 +100,7 @@ class ToolRegistry:
             ),
             "lighting_control": ToolSpec(
                 name="lighting_control",
-                description="Control vehicle lighting",
+                description="Control vehicle lighting including headlights and interior",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -102,29 +111,13 @@ class ToolRegistry:
             ),
             "drive_mode": ToolSpec(
                 name="drive_mode",
-                description="Control vehicle drive mode settings",
+                description="Control vehicle drive mode (sport, eco, comfort)",
                 parameters={
                     "type": "object",
                     "properties": {
                         "command": {"type": "string", "description": "Drive mode command"}
                     },
                     "required": ["command"],
-                },
-            ),
-            # Model Selection Tool
-            "select_model": ToolSpec(
-                name="select_model",
-                description="Intelligently select between local and remote models based on query complexity",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "User's query to analyze"},
-                        "context": {
-                            "type": "string",
-                            "description": "Optional conversation context",
-                        },
-                    },
-                    "required": ["query"],
                 },
             ),
         }
@@ -137,8 +130,17 @@ class ToolRegistry:
 
     def get_random_tools(self, count: int = 1) -> List[ToolSpec]:
         """Get random selection of tools"""
-        tool_names = list(self.tools.keys())
-        selected = random.sample(tool_names, min(count, len(tool_names)))
+        # Only use actually implemented tools (verified in src/agents/cockpit/)
+        # These are the exact tools registered in main.py
+        implemented_tools = [
+            "climate_control",
+            "window_control", 
+            "seat_control",
+            "lighting_control",
+            "drive_mode",
+        ]
+        available_tools = [name for name in implemented_tools if name in self.tools]
+        selected = random.sample(available_tools, min(count, len(available_tools)))
         return [self.tools[name] for name in selected]
 
 
@@ -158,7 +160,7 @@ class DataGenerator:
     # ====================================================================
 
     def _generate_with_llm(self, prompt: str) -> str:
-        """Generate content using foundation model via Bedrock"""
+        """Generate content using foundation model via Bedrock with retry logic"""
         body = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": DEFAULT_MAX_TOKENS,
@@ -174,10 +176,71 @@ class DataGenerator:
             # This is a placeholder for custom authentication logic
             pass
 
-        response = self.llm_client.invoke_model(modelId=DEFAULT_MODEL_ID, body=json.dumps(body))
-
-        result = json.loads(response["body"].read())
-        return result["content"][0]["text"]
+        # Retry logic with exponential backoff
+        for attempt in range(MAX_RETRIES):
+            try:
+                # Add base delay to prevent rapid-fire requests
+                if attempt > 0:
+                    delay = RATE_LIMIT_DELAY * (BACKOFF_FACTOR ** (attempt - 1))
+                    time.sleep(delay)
+                
+                response = self.llm_client.invoke_model(
+                    modelId=DEFAULT_MODEL_ID, 
+                    body=json.dumps(body)
+                )
+                
+                result = json.loads(response["body"].read())
+                return result["content"][0]["text"]
+                
+            except ClientError as e:
+                error_code = e.response.get('Error', {}).get('Code', '')
+                error_message = str(e)
+                
+                # Check for throttling errors
+                if 'ThrottlingException' in error_code or 'ThrottlingException' in error_message:
+                    if attempt < MAX_RETRIES - 1:
+                        delay = RATE_LIMIT_DELAY * (BACKOFF_FACTOR ** attempt)
+                        print(f"Rate limited. Retrying in {delay:.1f}s... (attempt {attempt + 1}/{MAX_RETRIES})")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        print(f"Max retries reached. Using fallback response.")
+                        return self._generate_fallback_response(prompt)
+                        
+                # Check for rate limit errors
+                elif 'Too many requests' in error_message or 'rate' in error_message.lower():
+                    if attempt < MAX_RETRIES - 1:
+                        delay = RATE_LIMIT_DELAY * (BACKOFF_FACTOR ** attempt)
+                        print(f"Rate limited. Retrying in {delay:.1f}s... (attempt {attempt + 1}/{MAX_RETRIES})")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        print(f"Max retries reached. Using fallback response.")
+                        return self._generate_fallback_response(prompt)
+                else:
+                    # Re-raise non-throttling errors
+                    raise
+                    
+        # Fallback if all retries exhausted
+        return self._generate_fallback_response(prompt)
+    
+    def _generate_fallback_response(self, prompt: str) -> str:
+        """Generate a fallback response when LLM is unavailable"""
+        # Simple fallback responses based on prompt content
+        if "climate_control" in prompt.lower():
+            return "Set the temperature to 72 degrees"
+        elif "window_control" in prompt.lower():
+            return "Open the driver window"
+        elif "seat_control" in prompt.lower():
+            return "Adjust my seat position"
+        elif "lighting_control" in prompt.lower():
+            return "Turn on the headlights"
+        elif "drive_mode" in prompt.lower():
+            return "Switch to sport mode"
+        elif "select_model" in prompt.lower():
+            return "What's the weather like today?"
+        else:
+            return "Help me with this task"
 
     def _generate_user_request(self, tool_spec: ToolSpec) -> str:
         """Generate realistic user request for the specified tool"""
@@ -196,8 +259,8 @@ Requirements:
 
 Examples of good requests:
 - "It's getting too warm in here" (for climate_control)
-- "My tire pressure warning light just came on" (for vehicle_assistant)  
-- "What do I have scheduled today?" (for calendar_assistant)
+- "Open the driver side window" (for window_control)  
+- "Switch to sport mode" (for drive_mode)
 
 Generate just the user request, nothing else:"""
 
@@ -283,10 +346,10 @@ Requirements:
 - Sound like something said while driving
 - Don't mention the tool name directly
 
-Examples for different assistants:
-- "What's on my calendar today?"
-- "Check engine light came on"
-- "Find nearby gas stations"
+Examples for different systems:
+- "Turn on the heated seats"
+- "Set cruise control"
+- "Adjust the mirrors"
 
 Generate just the query:"""
 
@@ -455,28 +518,137 @@ Generate just the response:"""
         # Fallback to first line if no clean line found
         return lines[0].strip().strip('"').strip("'") if lines else "Task completed successfully."
 
+    def convert_to_training_format(self, conversation: Dict) -> str:
+        """Convert Strands format to plain text training format for llama.cpp
+        
+        This matches the format that llama.cpp expects AFTER Jinja processing.
+        No chat template tokens, just plain text with XML tool tags.
+        """
+        lines = []
+        
+        # Add tools section
+        lines.append("# Tools")
+        lines.append("<tools>")
+        for tool in conversation.get('tools', []):
+            lines.append(f"{tool['name']}: {tool['description']}")
+        lines.append("</tools>")
+        lines.append("")
+        
+        # Process messages
+        for msg in conversation.get('messages', []):
+            if msg['role'] == 'user':
+                if isinstance(msg['content'], str):
+                    lines.append(f"User: {msg['content']}")
+                elif isinstance(msg['content'], list):
+                    for item in msg['content']:
+                        if 'toolResult' in item:
+                            for c in item['toolResult'].get('content', []):
+                                if 'text' in c:
+                                    lines.append(f"Tool Result: {c['text']}")
+                        elif 'text' in item:
+                            lines.append(f"User: {item['text']}")
+                            
+            elif msg['role'] == 'assistant':
+                if isinstance(msg['content'], str):
+                    lines.append(f"Assistant: {msg['content']}")
+                elif isinstance(msg['content'], list):
+                    for item in msg['content']:
+                        if 'text' in item:
+                            lines.append(f"Assistant: {item['text']}")
+                        elif 'toolUse' in item:
+                            lines.append("Assistant: <tool_call>")
+                            tool_data = {
+                                "name": item['toolUse']['name'],
+                                "arguments": item['toolUse']['input']
+                            }
+                            lines.append(json.dumps(tool_data))
+                            lines.append("</tool_call>")
+        
+        return "\n".join(lines)
+
     def generate_dataset(
-        self, num_examples: int = 1000, output_path: str = "training_data.jsonl"
+        self, num_examples: int = 1000, output_path: str = "training_data.jsonl",
+        use_batching: bool = True, format_for_training: bool = True
     ) -> None:
-        """Generate complete training dataset"""
+        """Generate complete training dataset with rate limiting and batching
+        
+        Args:
+            num_examples: Number of examples to generate
+            output_path: Path to save dataset
+            use_batching: Whether to use batch delays
+            format_for_training: If True, convert to plain text training format
+        """
 
         output_file = Path(output_path)
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         with open(output_file, "w") as f:
             for i in range(num_examples):
-                # Select random tools
-                num_tools = random.randint(1, 3)
-                tools = self.tool_registry.get_random_tools(num_tools)
+                # Add delay between individual requests to prevent rate limiting
+                if i > 0:
+                    time.sleep(RATE_LIMIT_DELAY)
+                
+                # Add longer delay between batches
+                if use_batching and i > 0 and i % BATCH_SIZE == 0:
+                    print(f"Completed batch {i // BATCH_SIZE}. Pausing for {BATCH_DELAY}s to avoid rate limits...")
+                    time.sleep(BATCH_DELAY)
+                
+                try:
+                    # Select random tools (ONLY PRODUCTION TOOLS)
+                    num_tools = random.randint(1, 3)
+                    tools = self.tool_registry.get_random_tools(num_tools)
 
-                # Generate conversation
-                include_multimodal = random.random() < 0.3
-                conversation = self.generate_conversation(tools, include_multimodal)
+                    # Generate conversation (NO MULTIMODAL for cleaner training)
+                    conversation = self.generate_conversation(tools, include_multimodal=False)
 
-                # Write to file
-                f.write(json.dumps(conversation) + "\n")
+                    if format_for_training:
+                        # Convert to training format
+                        training_text = self.convert_to_training_format(conversation)
+                        f.write(json.dumps({"text": training_text}) + "\n")
+                    else:
+                        # Keep original format
+                        f.write(json.dumps(conversation) + "\n")
 
-                if (i + 1) % 100 == 0:
-                    print(f"Generated {i + 1}/{num_examples} examples (LLM-generated)")
+                    if (i + 1) % 10 == 0:
+                        print(f"Generated {i + 1}/{num_examples} examples")
+                        
+                except Exception as e:
+                    print(f"Error generating example {i + 1}: {e}")
+                    # Continue with next example even if one fails
+                    continue
 
         print(f"Dataset saved to {output_file}")
+
+
+def main():
+    """Generate training and test datasets in correct format"""
+    
+    # Initialize generator
+    generator = DataGenerator()
+    
+    print("Generating training dataset with ONLY production tools...")
+    print("Tools: climate_control, window_control, seat_control, lighting_control, drive_mode")
+    print("-" * 60)
+    
+    # Generate training data in correct format
+    generator.generate_dataset(
+        num_examples=500,
+        output_path="data/train_formatted.jsonl",
+        format_for_training=True  # Convert to plain text format
+    )
+    
+    # Generate test data in correct format
+    print("\nGenerating test dataset...")
+    generator.generate_dataset(
+        num_examples=100,
+        output_path="data/test_formatted.jsonl",
+        format_for_training=True  # Convert to plain text format
+    )
+    
+    print("\nDatasets generated successfully!")
+    print("Format: Plain text with <tool_call> XML tags")
+    print("Ready for fine-tuning with the fixed notebook!")
+
+
+if __name__ == "__main__":
+    main()
