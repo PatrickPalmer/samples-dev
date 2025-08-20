@@ -7,7 +7,7 @@ name = "agentic-ai-edge"
 version = "1.0.0"
 description = "Agentic AI assistant system optimized for edge"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 
 classifiers = [
@@ -19,8 +19,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -29,37 +27,32 @@ classifiers = [
 dependencies = [
     # Core AI/ML Framework
     "strands-agents @ git+https://github.com/westonbrown/sdk-python.git@main",
-    
     # Configuration Management
-    "python-dotenv>=1.0.0",  # Environment variable management
-    "pyyaml>=6.0.1",         # YAML configuration support
-    
+    "python-dotenv>=1.0.0", # Environment variable management
+    "pyyaml>=6.0.1", # YAML configuration support
     # Web & API Dependencies
-    "requests>=2.31.0,<3.0.0",      # HTTP client
-    "httpx>=0.24.0,<1.0.0",         # Modern async HTTP client
-    "fastapi>=0.100.0,<1.0.0",      # API framework
-    "uvicorn[standard]>=0.23.0,<1.0.0",  # ASGI server
-    
+    "requests>=2.31.0,<3.0.0", # HTTP client
+    "httpx>=0.24.0,<1.0.0", # Modern async HTTP client
+    "fastapi>=0.100.0,<1.0.0", # API framework
+    "uvicorn[standard]>=0.23.0,<1.0.0", # ASGI server
     # AWS Integration
-    "aws-requests-auth>=0.4.3,<0.5.0",  # AWS request signing
-    
+    "aws-requests-auth>=0.4.3,<0.5.0", # AWS request signing
+    "boto3>=1.28.0,<2.0.0",             # AWS SDK for Bedrock
     # Data Processing & Validation
-    "pydantic>=2.0.0,<3.0.0",       # Data validation
-    "numpy>=1.24.0,<2.0.0",         # Numerical computing
-    "orjson>=3.9.0,<4.0.0",         # Fast JSON processing
-    
+    "pydantic>=2.0.0,<3.0.0", # Data validation
+    "numpy>=1.24.0,<2.0.0", # Numerical computing
+    "orjson>=3.9.0,<4.0.0", # Fast JSON processing
     # Content Processing
-    "markdownify>=0.11.0,<1.0.0",   # HTML to Markdown conversion
-    "readabilipy>=0.2.0,<1.0.0",    # Web content extraction
-    
+    "markdownify>=0.11.0,<1.0.0", # HTML to Markdown conversion
+    "readabilipy>=0.2.0,<1.0.0", # Web content extraction
     # Utilities
-    "pytz>=2023.3",                 # Timezone support
-    "psutil>=5.9.0,<6.0.0",         # System monitoring
-    "py-cpuinfo>=9.0.0,<10.0.0",    # CPU information
-    "sympy>=1.12.0,<2.0.0",         # Symbolic mathematics
-    
+    "pytz>=2023.3", # Timezone support
+    "psutil>=5.9.0,<6.0.0", # System monitoring
+    "py-cpuinfo>=9.0.0,<10.0.0", # CPU information
+    "sympy>=1.12.0,<2.0.0", # Symbolic mathematics
     # UI & Display
-    "rich>=13.7.0,<14.0.0",         # Rich terminal output
+    "rich>=13.7.0,<14.0.0", # Rich terminal output
+    "huggingface-hub[cli]>=0.34.4",
 ]
 
 [project.optional-dependencies]
@@ -105,20 +98,20 @@ ml = [
 
 asr = [
     # ASR Fine-tuning Dependencies
-    "datasets==2.18.0",          # For Common Voice dataset loading
-    "transformers==4.36.0",      # Whisper model support
-    "accelerate==0.25.0",        # Training optimization
-    "evaluate==0.4.1",           # Metrics computation
-    "jiwer==3.0.3",             # WER/CER calculation
-    "peft==0.7.1",              # LoRA implementation
-    "librosa==0.10.1",          # Audio processing
-    "soundfile==0.12.1",        # Audio I/O (required for Common Voice)
-    "audioread>=3.0.0",         # Alternative audio decoder for MP3
-    "pydub>=0.25.0",            # Audio format conversion
-    "tensorboard>=2.14.0",      # Training visualization
-    "matplotlib>=3.7.0",        # Plotting results
-    "torch>=2.0.0",             # PyTorch (required by transformers)
-    "torchaudio>=2.0.0",        # Audio processing for PyTorch
+    "datasets>=2.18.0,<4.0.0",          # For Common Voice dataset loading
+    "transformers>=4.44.0,<4.46.0",     # Whisper model support (aligned with function-calling)
+    "accelerate>=0.25.0,<0.35.0",       # Training optimization (aligned with function-calling)
+    "evaluate>=0.4.1,<1.0.0",           # Metrics computation
+    "jiwer>=3.0.3,<4.0.0",             # WER/CER calculation
+    "peft>=0.7.1,<0.15.0",             # LoRA implementation (aligned with function-calling)
+    "librosa>=0.10.1,<1.0.0",          # Audio processing
+    "soundfile>=0.12.1,<1.0.0",        # Audio I/O (required for Common Voice)
+    "audioread>=3.0.0",                 # Alternative audio decoder for MP3
+    "pydub>=0.25.0",                    # Audio format conversion
+    "tensorboard>=2.14.0",              # Training visualization
+    "matplotlib>=3.7.0",                # Plotting results
+    "torch>=2.3.0,<2.4.0",             # PyTorch (aligned with function-calling)
+    "torchaudio>=2.3.0,<2.4.0",        # Audio processing for PyTorch (aligned with torch)
 ]
 
 function-calling = [
@@ -215,7 +208,7 @@ norecursedirs = [".git", ".tox", "dist", "build", "*.egg"]
 
 [tool.black]
 line-length = 100
-target-version = ['py38', 'py39', 'py310', 'py311', 'py312']
+target-version = ['py310', 'py311', 'py312']
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -235,7 +228,7 @@ extend-exclude = '''
 
 [tool.ruff]
 line-length = 100
-target-version = "py38"
+target-version = "py310"
 
 select = [
     "E",   # pycodestyle errors
