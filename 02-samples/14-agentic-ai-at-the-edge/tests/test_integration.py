@@ -70,7 +70,7 @@ class TestRealModels:
     @requires_llamacpp
     def test_llamacpp_model_inference(self):
         """Test real LlamaCpp model inference."""
-        from strands.models import LlamaCppModel
+        from strands.models.llamacpp import LlamaCppModel
 
         model = LlamaCppModel(
             base_url=LLAMACPP_URL,
@@ -87,7 +87,7 @@ class TestRealModels:
     def test_llamacpp_with_tools(self):
         """Test LlamaCpp with tool calling."""
         from strands import Agent, tool
-        from strands.models import LlamaCppModel
+        from strands.models.llamacpp import LlamaCppModel
 
         @tool
         def calculate(expression: str) -> str:

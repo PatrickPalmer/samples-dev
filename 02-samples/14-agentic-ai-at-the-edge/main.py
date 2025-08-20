@@ -34,7 +34,8 @@ else:
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 from strands import Agent
-from strands.models import BedrockModel, LlamaCppModel
+from strands.models import BedrockModel
+from strands.models.llamacpp import LlamaCppModel
 from strands.agent import SlidingWindowConversationManager
 from src.agents.cockpit import (
     climate_control,
@@ -70,6 +71,14 @@ else:
     Panel = None
     Text = None
     Table = None
+
+# Configure logging level based on environment variable
+DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
+if DEBUG_MODE:
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    print("🐛 DEBUG MODE ENABLED - Detailed logging active")
+else:
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 logger = logging.getLogger(__name__)
 
@@ -108,8 +117,38 @@ import uvicorn
 
 
 def create_bedrock_model():
-    """Create new Bedrock model instance"""
-    return BedrockModel(model_id=BEDROCK_MODEL_ID)
+    """Create new Bedrock model instance with flexible AWS credential handling"""
+    import boto3
+
+    # Get AWS configuration from environment
+    aws_profile = os.getenv("AWS_PROFILE")
+    aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
+    aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+    aws_region = os.getenv("AWS_REGION", "us-east-1")
+
+    # Create session based on available credentials
+    if aws_profile:
+        # Use specific profile
+        session = boto3.Session(profile_name=aws_profile, region_name=aws_region)
+        print(f"[BEDROCK] Using AWS profile: {aws_profile}")
+    elif aws_access_key and aws_secret_key:
+        # Use access key/secret
+        session = boto3.Session(
+            aws_access_key_id=aws_access_key,
+            aws_secret_access_key=aws_secret_key,
+            region_name=aws_region
+        )
+        print("[BEDROCK] Using AWS access key/secret")
+    else:
+        # Use default credential chain
+        session = boto3.Session(region_name=aws_region)
+        print("[BEDROCK] Using default AWS credentials")
+
+    return BedrockModel(
+        model_id=BEDROCK_MODEL_ID,
+        region_name=aws_region,
+        session=session
+    )
 
 
 def create_llamacpp_model():
@@ -130,8 +169,8 @@ def create_llamacpp_model():
     )
 
 
-# Orchestrator prompt for edge deployment
-ORCHESTRATOR_PROMPT = """You are Alex, a highly capable AI assistant designed for edge deployment in automotive and industrial environments.
+# Orchestrator prompt for edge deployment (local model)
+ORCHESTRATOR_PROMPT_LOCAL = """You are Alex, a highly capable AI assistant designed for edge deployment in automotive and industrial environments.
 
 🚨 FIRST: ANALYZE THE USER'S REQUEST AND ROUTE TO THE CORRECT SPECIALIST:
 
@@ -190,6 +229,39 @@ INTERACTION GUIDELINES:
 
 Remember: You coordinate specialist agents to deliver comprehensive assistance while maintaining operational safety and efficiency."""
 
+# General-purpose prompt for cloud/Bedrock deployment
+ORCHESTRATOR_PROMPT_CLOUD = """You are Alex, a highly capable AI assistant with access to advanced cloud-based reasoning capabilities.
+
+CORE CAPABILITIES:
+- Complex analysis and strategic thinking
+- Comprehensive research and detailed explanations
+- Multi-step problem solving and planning
+- Creative writing and content generation
+- Technical analysis and code review
+- Business strategy and market analysis
+
+VEHICLE CONTROLS (when requested):
+IF USER MENTIONS: temperature, AC, heat, cool, defrost, fan, air → USE climate_control
+IF USER MENTIONS: window, windows, sunroof, open window, close window, vent → USE window_control
+IF USER MENTIONS: seat, recline, lumbar, seat heating, seat cooling, memory position → USE seat_control
+IF USER MENTIONS: lights, headlights, interior lights, ambient, fog lights, reading light → USE lighting_control
+IF USER MENTIONS: sport mode, eco mode, drive mode, traction control, lane assist → USE drive_mode
+
+APPROACH:
+- Provide comprehensive, detailed responses for complex queries
+- Use analytical thinking and structured reasoning
+- Offer strategic insights and actionable recommendations
+- Support both automotive and general-purpose assistance
+- Maintain professional expertise across diverse domains
+
+INTERACTION STYLE:
+- Thorough and analytical for complex requests
+- Concise and direct for simple commands
+- Proactive in offering additional insights
+- Clear structure with headings and bullet points when helpful
+
+You have access to powerful cloud-based reasoning and can handle sophisticated analysis, strategic planning, and detailed explanations across any domain."""
+
 
 def get_orchestrator():
     """Get or create the main orchestrator agent with conversation management"""
@@ -199,8 +271,8 @@ def get_orchestrator():
         driver_profile = os.environ.get("DRIVER_PROFILE", "guest").lower()
         user_profile = get_user_profile(driver_profile)
 
-        # Create personalized prompt
-        personalized_prompt = ORCHESTRATOR_PROMPT + "\n\n" + user_profile["personalization_prompt"]
+        # Create personalized prompt (default to local/automotive prompt)
+        personalized_prompt = ORCHESTRATOR_PROMPT_LOCAL + "\n\n" + user_profile["personalization_prompt"]
 
         _orchestrator = Agent(
             model=create_llamacpp_model(),
@@ -233,16 +305,25 @@ def update_orchestrator_model(provider: str):
     """Update the orchestrator's model based on selection and propagate to agents"""
     orchestrator = get_orchestrator()
 
-    # Create new model based on provider
+    # Get user profile for personalization
+    driver_profile = os.environ.get("DRIVER_PROFILE", "guest").lower()
+    user_profile = get_user_profile(driver_profile)
+
+    # Create new model and prompt based on provider
     if provider == "llamacpp":
         new_model = create_llamacpp_model()
+        # Use automotive-focused prompt for local model
+        new_prompt = ORCHESTRATOR_PROMPT_LOCAL + "\n\n" + user_profile["personalization_prompt"]
         print("[LOCAL] Switched to local LlamaCpp model")
     else:
         new_model = create_bedrock_model()
+        # Use general-purpose prompt for cloud model
+        new_prompt = ORCHESTRATOR_PROMPT_CLOUD + "\n\n" + user_profile["personalization_prompt"]
         print("[CLOUD] Switched to cloud Bedrock model")
 
-    # Update the orchestrator model
+    # Update the orchestrator model and system prompt
     orchestrator.model = new_model
+    orchestrator.system_prompt = new_prompt
 
     # Update all agent models to match orchestrator's selection
     # Note: Cockpit controls use local model only by design

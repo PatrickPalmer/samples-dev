@@ -103,7 +103,7 @@ flowchart LR
 ### 1. Development Mode
 Direct execution on developer machine with full capabilities:
 ```bash
-python main.py
+uv run main.py
 ```
 - **Audio**: Direct microphone access via sounddevice
 - **Models**: Dynamic selection between local/cloud
@@ -123,7 +123,7 @@ docker run -v $(pwd)/audio_exchange:/app/audio_exchange agentic-ai-edge
 ### 3. Service/API Mode
 RESTful service for integration:
 ```bash
-ENABLE_API=true python main.py
+ENABLE_API=true uv run main.py
 # or
 docker run -e ENABLE_API=true -p 8000:8000 agentic-ai-edge
 ```
@@ -134,29 +134,127 @@ docker run -e ENABLE_API=true -p 8000:8000 agentic-ai-edge
 
 ## Quick Start
 
+### Complete Setup (5 minutes)
+
+```bash
+# 1. Install uv package manager
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. Install Homebrew (if not already installed)
+curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | bash
+
+# 3. Add Homebrew to PATH (Linux users)
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+
+# 4. Install llama.cpp
+brew install llama.cpp
+
+# 5. Clone and setup the project
+git clone <repository-url>
+cd 02-samples/14-agentic-ai-at-the-edge
+uv pip install -e .
+
+# 6. Download models
+mkdir -p models && cd models
+# Download Qwen3-1.7B model (optimized GGUF from Unsloth)
+uv run hf download unsloth/Qwen3-1.7B-GGUF Qwen3-1.7B-Q4_K_M.gguf --local-dir .
+# Download Whisper model for speech recognition
+uv run hf download ggerganov/whisper.cpp ggml-base.bin --local-dir .
+cd ..
+
+# 7. Start llama-server (in one terminal)
+llama-server -m models/Qwen3-1.7B-Q4_K_M.gguf --host 0.0.0.0 --port 8080 -c 32768 -ngl 50 --chat-template qwen3
+
+# 8. Run the assistant (in another terminal)
+uv run main.py
+```
+
 ### Prerequisites
 
-1. Python 3.8 or higher
-2. Strands SDK: `pip install git+https://github.com/westonbrown/sdk-python.git@main`
-3. llama.cpp with server support
+1. Python 3.10 or higher
+2. uv package manager: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+3. llama.cpp with server support (see installation below)
 4. FFmpeg with Whisper support (compiled in container)
-5. (Optional) AWS credentials for Bedrock access
+5. (Optional) AWS credentials for Bedrock cloud model access
+
+### Installing llama.cpp
+
+#### Option 1: Homebrew (Recommended for Mac and Linux)
+
+**Step 1: Install Homebrew**
+```bash
+# Install Homebrew (if not already installed)
+curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | bash
+
+# Add Homebrew to your PATH (Linux users)
+echo >> ~/.bashrc
+echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.bashrc
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+
+# For macOS users, Homebrew is automatically added to PATH
+```
+
+**Step 2: Install llama.cpp**
+```bash
+# Install llama.cpp via Homebrew
+brew install llama.cpp
+
+# Verify installation
+which llama-server
+llama-server --help
+```
+
+**Step 3: Install build dependencies (Linux only)**
+```bash
+# Install build tools if you encounter compilation issues
+sudo apt-get update
+sudo apt-get install build-essential
+
+# Install GCC via Homebrew for better compatibility
+brew install gcc
+```
+
+#### Option 2: Other Package Managers
+- **Winget (Windows)**: `winget install llama.cpp`
+- **MacPorts (Mac)**: `sudo port install llama.cpp`
+- **Nix (Mac/Linux)**: `nix profile install nixpkgs#llama-cpp`
+
+#### Option 3: Build from Source
+```bash
+git clone https://github.com/ggml-org/llama.cpp.git
+cd llama.cpp
+make -j$(nproc)
+# Binaries will be in the current directory
+```
+
+#### Troubleshooting
+
+**If you get "command not found" errors:**
+```bash
+# Ensure Homebrew is in your PATH
+echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+**If installation fails with permission errors:**
+```bash
+# Make sure you have the required permissions
+sudo chown -R $(whoami) /home/linuxbrew/.linuxbrew/
+```
 
 ### Installation
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies using uv
+uv pip install -e .
 
 # Run in development mode
-python main.py
+uv run main.py
 
 # Or run in API mode
-ENABLE_API=true python main.py
+ENABLE_API=true uv run main.py
 ```
 
-<<<<<<< HEAD
-=======
 ### Voice-Enabled Setup (Recommended)
 
 #### Model Selection
@@ -172,19 +270,151 @@ Voice processing is handled separately by FFmpeg with integrated Whisper for opt
 1. **Download Qwen3-1.7B model**:
 ```bash
 mkdir -p models && cd models
-huggingface-cli download Qwen/Qwen3-1.7B-Instruct-GGUF qwen3-1.7b-instruct-q8_0.gguf --local-dir .
-huggingface-cli download ggerganov/whisper.cpp ggml-base.bin --local-dir .
+# Download optimized Q4_K_M variant from Unsloth
+uv run hf download unsloth/Qwen3-1.7B-GGUF Qwen3-1.7B-Q4_K_M.gguf --local-dir .
+uv run hf download ggerganov/whisper.cpp ggml-base.bin --local-dir .
 ```
 
 2. **Start llama-server**:
 ```bash
-llama-server -m qwen3-1.7b-instruct-q8_0.gguf \
-  --host 0.0.0.0 --port 8080 -c 32768 -ngl 50 --chat-template qwen3
+# Start the llama.cpp server with the Qwen model
+llama-server -m models/Qwen3-1.7B-Q4_K_M.gguf \
+  --host 0.0.0.0 --port 8080 -c 2048 --chat-template qwen3 --jinja
+
+# Alternative: Use tmux to run in background
+tmux new-session -d -s llama-server
+tmux send-keys -t llama-server 'llama-server -m models/Qwen3-1.7B-Q4_K_M.gguf --host 0.0.0.0 --port 8080 -c 2048 --chat-template qwen3 --jinja' Enter
+
+# The server will start and show:
+# - Model loading progress
+# - Server listening on http://0.0.0.0:8080
+# - Keep this terminal open while using the assistant
 ```
 
-3. **Run the assistant**:
+3. **Verify the server is running** (in a new terminal):
 ```bash
-python main.py
+# Test the server endpoint
+curl http://localhost:8080/health
+
+# Should return: {"status":"ok"}
+```
+
+4. **Run the assistant**:
+```bash
+uv run main.py
+```
+
+### Server Parameters Explained
+
+- `-m models/Qwen3-1.7B-Q4_K_M.gguf`: Path to the model file
+- `--host 0.0.0.0`: Listen on all network interfaces
+- `--port 8080`: Server port (matches the application configuration)
+- `-c 2048`: Context window size (2K tokens for faster processing)
+- `--chat-template qwen3`: Use Qwen3 chat template for proper formatting
+- `--jinja`: Enable Jinja template support (required for qwen3 template)
+
+**Note**: Use `-c 32768` for larger context if you have sufficient RAM, but 2048 is recommended for edge deployment.
+
+### Model Variant Selection
+
+We use the **Q4_K_M** quantization variant for optimal edge deployment:
+
+| Variant | Size | Quality | Speed | RAM Usage | Best For |
+|---------|------|---------|-------|-----------|----------|
+| **Q4_K_M** | ~1.0GB | High | Fast | ~2GB | **Edge deployment (recommended)** |
+| Q8_0 | ~1.7GB | Highest | Medium | ~3GB | High-accuracy scenarios |
+| Q4_0 | ~0.9GB | Good | Fastest | ~1.5GB | Resource-constrained devices |
+
+**Why Q4_K_M?**
+- **Balanced Performance**: Excellent quality-to-size ratio
+- **Edge Optimized**: Fits comfortably in 4GB RAM systems
+- **Fast Inference**: Quick response times for real-time interaction
+- **Production Ready**: Proven reliability in automotive environments
+
+### Model Source: Unsloth Optimized GGUF
+
+We use the [unsloth/Qwen3-1.7B-GGUF](https://huggingface.co/unsloth/Qwen3-1.7B-GGUF) repository for several advantages:
+
+✅ **Optimized Quantization**: Unsloth provides high-quality GGUF conversions with better preservation of model capabilities
+✅ **Multiple Variants**: Complete range of quantization levels (Q4_0, Q4_K_M, Q8_0, etc.)
+✅ **Edge-Tested**: Specifically optimized for inference performance
+✅ **Reliable Source**: Maintained by the Unsloth team with regular updates
+✅ **Smaller Downloads**: Individual variant files instead of downloading entire model repository
+
+### Download Size Comparison
+
+| Model Variant | File Size | Download Time* | RAM Usage | Quality |
+|---------------|-----------|----------------|-----------|---------|
+| **Q4_K_M** (recommended) | **~1.1GB** | **~3-5 min** | **~2GB** | **High** |
+| Q8_0 (high quality) | ~1.8GB | ~5-8 min | ~3GB | Highest |
+| Q4_0 (smallest) | ~0.9GB | ~2-4 min | ~1.5GB | Good |
+
+*Estimated download time on 50 Mbps connection
+
+## AWS Bedrock Configuration (Optional)
+
+The system supports intelligent model routing between local (LlamaCpp) and cloud (AWS Bedrock) models based on query complexity. AWS Bedrock is optional - the system works fully offline with just the local model.
+
+### AWS Credential Options
+
+The system supports multiple AWS credential methods (in order of preference):
+
+#### Option 1: AWS Profile (Recommended)
+```bash
+# Set in .env file
+AWS_PROFILE=your-profile-name
+AWS_REGION=us-east-1
+
+# Or set as environment variable
+export AWS_PROFILE=your-profile-name
+```
+
+#### Option 2: Access Keys (Not recommended for production)
+```bash
+# Set in .env file
+AWS_ACCESS_KEY_ID=your_access_key_id
+AWS_SECRET_ACCESS_KEY=your_secret_access_key
+AWS_REGION=us-east-1
+```
+
+#### Option 3: Default Credentials (Automatic)
+If no specific credentials are configured, the system will automatically use:
+- Default AWS profile from `~/.aws/credentials`
+- IAM roles (if running on EC2)
+- Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
+- AWS SSO credentials
+
+### Model Selection Behavior
+
+- **Complex queries** → AWS Bedrock (if credentials available) → Local model (fallback)
+- **Simple queries** → Local LlamaCpp model (always)
+- **No AWS credentials** → Local LlamaCpp model (always)
+- **AWS errors** → Local LlamaCpp model (fallback)
+
+### Model Selection Method
+
+The system uses **local model analysis** to intelligently classify query complexity:
+
+```bash
+# Uses local LLM to analyze query complexity and select appropriate model
+uv run main.py
+```
+
+**How it works**:
+- **Local Model Analysis**: Uses the local Qwen3-1.7B model to analyze each query
+- **Intelligent Classification**: Understands context, nuance, and user intent
+- **Graceful Fallback**: Defaults to local model if analysis fails
+- **Vehicle Priority**: Vehicle commands always use local model for speed and privacy
+
+### Testing AWS Configuration
+
+```bash
+# Test AWS credentials
+aws sts get-caller-identity
+
+# Run the assistant and try a complex query
+uv run main.py
+# Try: "Analyze the economic implications of renewable energy adoption"
 ```
 
 ## Features
@@ -206,10 +436,10 @@ USER: voice
 [Direct audio capture and processing]
 ```
 
-#### Container Mode  
+#### Container Mode
 ```bash
 # Host machine:
-python -m src.utils.audio_cli record --duration 10
+uv run python -m src.utils.audio_cli record --duration 10
 
 # In container:
 USER: voice
@@ -219,7 +449,7 @@ USER: voice
 #### API Mode
 ```bash
 # Client application:
-python -m src.utils.audio_cli api --duration 10 --url http://localhost:8000/chat
+uv run python -m src.utils.audio_cli api --duration 10 --url http://localhost:8000/chat
 # Or integrate with your application using base64 audio in JSON
 ```
 
@@ -234,7 +464,6 @@ All modes support:
 - Complex queries go to cloud model (if configured)
 
 
->>>>>>> 546ccc4 (data science pipeline refinement; qwen3 1.7b; whishper integration;)
 ## Edge Deployment Architecture
 
 ### The Power of Unified Codebase
@@ -304,7 +533,7 @@ flowchart TD
 
 ```bash
 cd tests
-python test_all.py
+uv run python test_all.py
 ```
 
 ## Architectural Summary
@@ -322,19 +551,17 @@ This project demonstrates that sophisticated AI systems don't require separate c
 # The same code runs in all these scenarios:
 
 # Developer's laptop
-$ python main.py
+$ uv run main.py
 
-# Automotive edge device  
+# Automotive edge device
 $ docker run -e DEPLOYMENT_TARGET=automotive ...
 
 # Cloud API service
-$ ENABLE_API=true python main.py
+$ ENABLE_API=true uv run main.py
 
 # Each automatically adapts its behavior to the environment
 ```
 
-<<<<<<< HEAD
-=======
 ### Real Impact
 - Faster Development: Write features once, test once, deploy everywhere
 - Consistent Behavior: Users get the same AI capabilities regardless of deployment
@@ -344,7 +571,6 @@ $ ENABLE_API=true python main.py
 
 This unified architecture demonstrates that edge AI can deliver enterprise-grade reasoning capabilities through intelligent adaptation to deployment environments.
 
->>>>>>> 546ccc4 (data science pipeline refinement; qwen3 1.7b; whishper integration;)
 ## License
 
 This project is part of the Strands SDK samples collection.

@@ -535,7 +535,7 @@ class TestPerformanceAndArchitecture:
         DEPLOYMENT_TARGET = os.getenv("DEPLOYMENT_TARGET", "development")
         MEMORY_LIMIT = os.getenv("MEMORY_LIMIT", "8g")
         # from src.agents.calendar_assistant import default_model  # Module doesn't exist
-        from strands.models import LlamaCppModel
+        from strands.models.llamacpp import LlamaCppModel
         default_model = LlamaCppModel(base_url="http://localhost:8080", model_id="default")
 
         # Test that configuration variables exist and have reasonable values

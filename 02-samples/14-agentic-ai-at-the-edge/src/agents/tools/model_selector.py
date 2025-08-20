@@ -7,7 +7,7 @@ and select the most appropriate model provider.
 
 from typing import Optional, Dict, Any
 from strands import tool, Agent
-from strands.models import LlamaCppModel
+from strands.models.llamacpp import LlamaCppModel
 import logging
 import json
 from ...config import BEDROCK_MODEL_ID, LLAMACPP_URL

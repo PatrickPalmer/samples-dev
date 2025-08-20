@@ -24,7 +24,8 @@ from src.agents.cockpit import (
 
 # Import for real model testing
 from strands import Agent
-from strands.models import BedrockModel, LlamaCppModel
+from strands.models import BedrockModel
+from strands.models.llamacpp import LlamaCppModel
 
 
 @pytest.mark.unit

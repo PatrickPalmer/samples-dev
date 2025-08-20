@@ -18,7 +18,8 @@ sys.path.insert(0, str(project_root / "src"))
 
 import requests
 from strands import Agent, tool
-from strands.models import LlamaCppModel, BedrockModel
+from strands.models import BedrockModel
+from strands.models.llamacpp import LlamaCppModel
 
 
 def test_llamacpp_server():
