@@ -1,74 +1,147 @@
-# Fine-Tuning Pipeline for Edge AI Function Calling
+# Data Science Pipeline for Edge AI
 
-Production-ready pipeline for fine-tuning Qwen3-1.7B to enable reliable function calling in edge deployments. This implementation addresses critical tokenization and format alignment challenges discovered through extensive production testing.
+This repository contains production-ready fine-tuning pipelines for multimodal edge AI deployment, enabling both voice interaction through automatic speech recognition and intelligent tool execution through function calling.
 
 ## Overview
 
-This pipeline provides a complete solution for fine-tuning language models for function calling in resource-constrained edge environments. The implementation solves fundamental issues with tokenization mismatches, data quality validation, and format alignment that cause baseline models to achieve 0% accuracy. Through careful architecture design and validation, the pipeline produces models that achieve 90%+ tool calling accuracy while maintaining sub-3GB memory footprint.
+The data science pipeline addresses two critical capabilities for edge AI systems: understanding spoken commands through ASR fine-tuning and executing actions through function calling fine-tuning. Both pipelines have been designed and tested for deployment on resource-constrained edge devices.
 
+## System Architecture
 
+```mermaid
+flowchart LR
+    A[Voice Input] --> B[ASR Model<br/>Whisper-base]
+    B --> C[Transcribed Text]
+    C --> D[Function Calling Model<br/>Qwen3-1.7B]
+    D --> E[Tool Selection]
+    E --> F[Virtual ECU]
+    F --> G[Vehicle Control]
+    
+    style A fill:#e3f2fd
+    style B fill:#fff3e0
+    style D fill:#f3e5f5
+    style F fill:#e8f5e9
+```
+
+## Pipeline Components
+
+### Function Calling Fine-Tuning
+
+The function calling pipeline fine-tunes Qwen3-1.7B for reliable tool execution in automotive edge environments. This implementation solves critical production challenges including tokenization mismatches and format alignment issues.
+
+| Component | Description | Technology |
+|-----------|-------------|------------|
+| Base Model | Language model for tool calling | Qwen3-1.7B |
+| Training Method | Parameter-efficient fine-tuning | LoRA (rank 16) |
+| Data Generation | Synthetic conversation creation | AWS Bedrock |
+| Quantization | Model compression for edge | Q4_K_M (4-bit) |
+| Deployment Format | Optimized inference format | GGUF |
+
+### Automatic Speech Recognition Fine-Tuning
+
+The ASR pipeline adapts OpenAI's Whisper model for specialized language support, with particular focus on continuous-script languages like Japanese.
+
+| Component | Description | Technology |
+|-----------|-------------|------------|
+| Base Model | Multilingual speech recognition | Whisper-base (74M) |
+| Training Method | Efficient adaptation | LoRA |
+| Dataset | Speech samples | Mozilla Common Voice |
+| Optimization | Memory efficiency | Gradient checkpointing |
+| Precision | Numerical stability | BF16 mixed precision |
+
+## Training Process Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User Command
+    participant D as Data Generator
+    participant T as Training Pipeline
+    participant Q as Quantization
+    participant E as Edge Deployment
+    
+    U->>D: Natural language examples
+    D->>D: Validate against tools
+    D->>T: Training dataset (JSONL)
+    T->>T: LoRA fine-tuning
+    T->>Q: Trained model
+    Q->>Q: K-means quantization
+    Q->>E: GGUF model file
+    E->>E: llama.cpp server
+```
+
+## Technical Implementation
+
+### Data Generation and Validation
+
+The function calling pipeline includes a sophisticated data generation system:
+
+```mermaid
+flowchart LR
+    A[Production Tools] --> B[Tool Registry]
+    B --> C[Data Generator]
+    C --> D[Bedrock Model]
+    D --> E[Synthetic Conversations]
+    E --> F[Format Validation]
+    F --> G[Training Dataset]
+    
+    style B fill:#e8f5e9
+    style D fill:#fff3e0
+    style F fill:#ffebee
+```
+
+### Model Quantization and Export
+
+Post-training optimization prepares models for edge deployment:
+
+| Method | Size Reduction | Quality Preserved | Use Case |
+|--------|---------------|-------------------|----------|
+| Q4_K_M | ~70% | High | Standard edge deployment |
+| Q8_0 | ~50% | Very High | Performance-critical |
+| IQ4_XS | ~75% | Good | Extreme resource constraints |
+
+## Production Deployment
+
+### Supported Vehicle Controls
+
+The system implements five production-ready control tools:
+
+| Tool | Function | Safety Constraints |
+|------|----------|-------------------|
+| climate_control | Temperature, AC, defrost | 60-85°F limits |
+| window_control | Windows, sunroof | No operation >45mph |
+| seat_control | Position, heating/cooling | No adjustment >5mph |
+| lighting_control | Headlights, ambient | Auto-activation at dusk |
+| drive_mode | Sport/eco/comfort | Stationary only |
+
+### Deployment Architecture
+
+```mermaid
+flowchart TB
+    A[Edge Device] --> B[Model Files]
+    B --> C[llama.cpp Server]
+    C --> D[Strands SDK]
+    D --> E[Agent Orchestrator]
+    E --> F[Virtual ECU]
+    
+    B --> G[Whisper Model<br/>~150MB]
+    B --> H[Qwen3 Model<br/>~1.1GB]
+    
+    style A fill:#e3f2fd
+    style C fill:#fff3e0
+    style F fill:#e8f5e9
+```
 
 ## Directory Structure
 
 ```
 data_science_pipeline/
-├── README.md                           # Architecture documentation
-├── utils/                              # Pipeline modules
-│   ├── __init__.py
-│   ├── data_generator.py              # Validated data creation
-├── data/                               # Training datasets
-│   ├── train.jsonl                    # Validated training data
-│   └── test.jsonl                     # Evaluation data
+├── function_calling_fine_tuning.ipynb  # Tool calling training
+├── asr_fine_tuning.ipynb              # Speech recognition training
+├── utils/
+│   └── data_generator.py              # Synthetic data creation
+└── data/
+    ├── train.jsonl                     # Training examples
+    └── test.jsonl                      # Evaluation examples
 ```
 
-## Production Tool Registry
-
-The pipeline validates against these exact production tools:
-
-### Cockpit Control Tools (Virtual ECU Integration)
-
-**climate_control**
-- Parameter: `command` (string)
-- Functions: Temperature adjustment, AC control, defrost, air circulation
-- Safety: Temperature limits 60-85°F
-
-**window_control**
-- Parameter: `command` (string)
-- Functions: Individual window control, all windows, sunroof
-- Safety: No operation above 45mph
-
-**seat_control**
-- Parameter: `command` (string)
-- Functions: Position adjustment, heating/cooling, memory presets
-- Safety: No adjustment while driving >5mph
-
-**lighting_control**
-- Parameter: `command` (string)
-- Functions: Headlights, fog lights, ambient lighting, interior dome
-- Safety: Auto-headlight activation at dusk
-
-**drive_mode**
-- Parameter: `command` (string)
-- Functions: Sport/eco/comfort modes, traction control, suspension
-- Safety: Mode changes only when stationary
-
-## Training Data Format
-
-The pipeline implements a carefully designed format that solves the tokenization mismatch problem while maintaining compatibility with the Strands SDK.
-
-### Critical Format Requirements
-
-**Plain Text Conversion**: Training data must be formatted as plain text matching what the model sees AFTER Jinja template processing, not the raw template format.
-
-**No Special Tokens**: Base models cannot process `<|im_start|>`, `<|im_end|>`, or similar tokens - these cause unknown token IDs and garbage output.
-
-**Exact Schema Matching**: Every parameter name and structure must match production exactly - `command` not `query` for control tools.
-
-### Conversation Flow Architecture
-
-Each training conversation follows this exact pattern:
-
-1. **User Request**: Natural language vehicle command
-2. **Assistant Acknowledgment + Tool Call**: Wrapped in content array
-3. **Tool Result**: System response as user message
-4. **Assistant Confirmation**: Summary of action taken
+Complete documentation and examples are available in the individual notebooks, which include step-by-step instructions and explanations of key concepts.
