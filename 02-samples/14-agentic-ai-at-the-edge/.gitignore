@@ -139,3 +139,5 @@ secrets/
 *token*.txt
 *api_key*.txt
 *secret*.txt
+
+**/*/llama.cpp/
