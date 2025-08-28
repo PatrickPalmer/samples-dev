@@ -5,26 +5,40 @@ Supports TechCar Model X and AutoDrive CX-7
 
 import logging
 from strands import tool
-from ...data.vehicle_systems import get_virtual_ecu
+from data.vehicle_systems import get_virtual_ecu
 
 logger = logging.getLogger(__name__)
 
 
 @tool
-def climate_control(command: str) -> str:
+def climate_control(
+    action: str,
+    temperature: int = None,
+    temperature_adjustment: int = None,
+    fan_speed: int = None,
+    fan_adjustment: int = None,
+    mode: str = None,
+    enable: bool = None
+) -> str:
     """
     Control the vehicle's climate system including temperature, fan speed, and air distribution.
 
-    Examples:
-    - "Set temperature to 72 degrees"
-    - "Turn on max AC"
-    - "Increase fan speed"
-    - "Turn on defrost"
-    - "I'm too hot" (will lower temperature)
-    - "It's freezing" (will increase heat)
-
     Args:
-        command: Natural language climate control request
+        action: The climate control action to perform. Options:
+            - "set_temperature": Set specific temperature
+            - "adjust_temperature": Adjust temperature by amount
+            - "set_fan_speed": Set specific fan speed
+            - "adjust_fan_speed": Adjust fan speed by amount
+            - "set_mode": Set climate mode
+            - "toggle_ac": Toggle air conditioning
+            - "toggle_defrost": Toggle defrost mode
+            - "turn_off": Turn off climate system
+        temperature: Target temperature in Fahrenheit (60-85) for set_temperature
+        temperature_adjustment: Temperature change in degrees (-10 to +10) for adjust_temperature
+        fan_speed: Fan speed level (0-7) for set_fan_speed
+        fan_adjustment: Fan speed change (-3 to +3) for adjust_fan_speed
+        mode: Climate mode for set_mode ("auto", "heat", "cool", "defrost", "vent")
+        enable: Enable/disable for toggle actions
 
     Returns:
         Confirmation of climate adjustment with current settings
@@ -32,154 +46,97 @@ def climate_control(command: str) -> str:
     ecu = get_virtual_ecu()
     current_climate = ecu.get_state("climate")
 
-    # Parse command to determine action
-    command_lower = command.lower()
-
     try:
-        # Temperature adjustment
-        if any(
-            word in command_lower
-            for word in ["temperature", "temp", "degrees", "warmer", "cooler", "hot", "cold"]
-        ):
-            if "set" in command_lower or "to" in command_lower:
-                # Extract temperature value
-                import re
+        # Validate action parameter
+        valid_actions = [
+            "set_temperature", "adjust_temperature", "set_fan_speed", "adjust_fan_speed",
+            "set_mode", "toggle_ac", "toggle_defrost", "turn_off"
+        ]
+        if action not in valid_actions:
+            return f"Invalid action '{action}'. Valid actions: {', '.join(valid_actions)}"
 
-                temp_match = re.search(r"(\d+)\s*(?:degrees?|°)?", command_lower)
-                if temp_match:
-                    target_temp = int(temp_match.group(1))
-                    result = ecu.execute_command(
-                        {"component": "climate", "action": "set_temperature", "value": target_temp}
-                    )
-                else:
-                    return "Please specify a temperature between 60 and 85 degrees"
-            elif (
-                "warmer" in command_lower
-                or "hotter" in command_lower
-                or "increase" in command_lower
-            ):
-                new_temp = min(current_climate["temperature_set"] + 3, 85)
-                result = ecu.execute_command(
-                    {"component": "climate", "action": "set_temperature", "value": new_temp}
-                )
-            elif (
-                "cooler" in command_lower
-                or "colder" in command_lower
-                or "decrease" in command_lower
-                or "too hot" in command_lower
-            ):
-                new_temp = max(current_climate["temperature_set"] - 3, 60)
-                result = ecu.execute_command(
-                    {"component": "climate", "action": "set_temperature", "value": new_temp}
-                )
-            elif "freezing" in command_lower or "too cold" in command_lower:
-                new_temp = min(current_climate["temperature_set"] + 5, 85)
-                result = ecu.execute_command(
-                    {"component": "climate", "action": "set_temperature", "value": new_temp}
-                )
-            else:
-                # Default temperature adjustment
-                result = ecu.execute_command(
-                    {"component": "climate", "action": "set_temperature", "value": 72}
-                )
-
-        # Max cooling
-        elif any(
-            phrase in command_lower
-            for phrase in ["max ac", "max cool", "maximum cooling", "blast cold"]
-        ):
-            result = ecu.execute_command({"component": "climate", "action": "max_cool"})
-
-        # Max heating
-        elif any(phrase in command_lower for phrase in ["max heat", "maximum heat", "blast heat"]):
-            result = ecu.execute_command({"component": "climate", "action": "max_heat"})
-
-        # Defrost
-        elif "defrost" in command_lower or "defog" in command_lower:
-            result = ecu.execute_command({"component": "climate", "action": "defrost"})
-
-        # Fan speed
-        elif "fan" in command_lower:
-            if "increase" in command_lower or "higher" in command_lower or "up" in command_lower:
-                new_speed = min(current_climate["fan_speed"] + 2, 7)
-                result = ecu.execute_command(
-                    {"component": "climate", "action": "set_fan_speed", "value": new_speed}
-                )
-            elif "decrease" in command_lower or "lower" in command_lower or "down" in command_lower:
-                new_speed = max(current_climate["fan_speed"] - 2, 0)
-                result = ecu.execute_command(
-                    {"component": "climate", "action": "set_fan_speed", "value": new_speed}
-                )
-            elif "max" in command_lower or "full" in command_lower:
-                result = ecu.execute_command(
-                    {"component": "climate", "action": "set_fan_speed", "value": 7}
-                )
-            elif "off" in command_lower or "stop" in command_lower:
-                result = ecu.execute_command(
-                    {"component": "climate", "action": "set_fan_speed", "value": 0}
-                )
-            else:
-                # Try to extract fan speed number
-                import re
-
-                speed_match = re.search(r"(\d+)", command_lower)
-                if speed_match:
-                    speed = min(int(speed_match.group(1)), 7)
-                    result = ecu.execute_command(
-                        {"component": "climate", "action": "set_fan_speed", "value": speed}
-                    )
-                else:
-                    return f"Current fan speed is {current_climate['fan_speed']}. Please specify a speed from 0-7."
-
-        # AC control
-        elif "ac" in command_lower or "air conditioning" in command_lower:
-            if "on" in command_lower:
-                result = ecu.execute_command(
-                    {"component": "climate", "action": "toggle_ac", "value": True}
-                )
-            elif "off" in command_lower:
-                result = ecu.execute_command(
-                    {"component": "climate", "action": "toggle_ac", "value": False}
-                )
-            else:
-                # Toggle AC
-                result = ecu.execute_command(
-                    {
-                        "component": "climate",
-                        "action": "toggle_ac",
-                        "value": not current_climate["ac_on"],
-                    }
-                )
-
-        # Recirculation
-        elif "recirc" in command_lower or "recirculation" in command_lower:
-            current_recirc = current_climate.get("recirc", False)
+        # Handle temperature actions
+        if action == "set_temperature":
+            if temperature is None:
+                return "Temperature value required for set_temperature action"
+            if not (60 <= temperature <= 85):
+                return "Temperature must be between 60 and 85 degrees Fahrenheit"
             result = ecu.execute_command(
-                {"component": "climate", "action": "toggle_recirc", "value": not current_recirc}
+                {"component": "climate", "action": "set_temperature", "value": temperature}
             )
 
-        # Turn off climate
-        elif (
-            any(phrase in command_lower for phrase in ["turn off", "stop", "disable"])
-            and "climate" in command_lower
-        ):
+        elif action == "adjust_temperature":
+            if temperature_adjustment is None:
+                return "Temperature adjustment value required for adjust_temperature action"
+            if not (-10 <= temperature_adjustment <= 10):
+                return "Temperature adjustment must be between -10 and +10 degrees"
+            new_temp = current_climate["temperature_set"] + temperature_adjustment
+            new_temp = max(60, min(85, new_temp))  # Clamp to valid range
+            result = ecu.execute_command(
+                {"component": "climate", "action": "set_temperature", "value": new_temp}
+            )
+
+        # Handle fan speed actions
+        elif action == "set_fan_speed":
+            if fan_speed is None:
+                return "Fan speed value required for set_fan_speed action"
+            if not (0 <= fan_speed <= 7):
+                return "Fan speed must be between 0 and 7"
+            result = ecu.execute_command(
+                {"component": "climate", "action": "set_fan_speed", "value": fan_speed}
+            )
+
+        elif action == "adjust_fan_speed":
+            if fan_adjustment is None:
+                return "Fan adjustment value required for adjust_fan_speed action"
+            if not (-3 <= fan_adjustment <= 3):
+                return "Fan adjustment must be between -3 and +3"
+            new_speed = current_climate["fan_speed"] + fan_adjustment
+            new_speed = max(0, min(7, new_speed))  # Clamp to valid range
+            result = ecu.execute_command(
+                {"component": "climate", "action": "set_fan_speed", "value": new_speed}
+            )
+
+        # Handle mode actions
+        elif action == "set_mode":
+            if mode is None:
+                return "Mode value required for set_mode action"
+            valid_modes = ["auto", "heat", "cool", "defrost", "vent"]
+            if mode not in valid_modes:
+                return f"Invalid mode '{mode}'. Valid modes: {', '.join(valid_modes)}"
+
+            if mode == "defrost":
+                result = ecu.execute_command({"component": "climate", "action": "defrost"})
+            elif mode == "cool":
+                result = ecu.execute_command({"component": "climate", "action": "max_cool"})
+            elif mode == "heat":
+                result = ecu.execute_command({"component": "climate", "action": "max_heat"})
+            else:
+                result = ecu.execute_command(
+                    {"component": "climate", "action": "set_mode", "value": mode}
+                )
+
+        # Handle toggle actions
+        elif action == "toggle_ac":
+            if enable is None:
+                # Toggle current state
+                enable = not current_climate["ac_on"]
+            result = ecu.execute_command(
+                {"component": "climate", "action": "toggle_ac", "value": enable}
+            )
+
+        elif action == "toggle_defrost":
+            if enable is None:
+                return "Enable value required for toggle_defrost action"
+            result = ecu.execute_command({"component": "climate", "action": "defrost"})
+
+        elif action == "turn_off":
             result = ecu.execute_command(
                 {"component": "climate", "action": "set_fan_speed", "value": 0}
             )
 
         else:
-            # Default response with current state
-            return f"""Current climate settings:
-- Temperature: {current_climate['temperature_set']}°F (current cabin: {current_climate['temperature_current']}°F)
-- Fan speed: {current_climate['fan_speed']}/7
-- Mode: {current_climate['mode']}
-- AC: {'On' if current_climate['ac_on'] else 'Off'}
-
-You can say things like:
-- "Set temperature to 72"
-- "Turn on max AC"
-- "Increase fan speed"
-- "Turn on defrost" """
+            return f"Unknown action '{action}'. Valid actions: {', '.join(valid_actions)}"
 
         # Process result
         if result["success"]:

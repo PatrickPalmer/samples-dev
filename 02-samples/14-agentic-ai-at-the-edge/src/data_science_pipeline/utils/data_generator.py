@@ -23,10 +23,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from botocore.exceptions import ClientError
 
+# Try to import transformers for chat template support
+try:
+    from transformers import AutoTokenizer
+    HAS_TRANSFORMERS = True
+except ImportError:
+    HAS_TRANSFORMERS = False
+    print("Warning: transformers not available. Using manual chat formatting.")
+
 
 # Configuration constants
 DEFAULT_MODEL_ID = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
-DEFAULT_REGION = "us-east-1"
+DEFAULT_REGION = "us-west-2"
 DEFAULT_MAX_TOKENS = 1000
 DEFAULT_TEMPERATURE = 0.7
 
@@ -64,16 +72,26 @@ class ToolRegistry:
         """Initialize ONLY the 5 production cockpit control tools"""
 
         tools = {
-            # PRODUCTION TOOLS ONLY - All take a 'command' string parameter
+            # PRODUCTION TOOLS - Now using structured parameters
             "climate_control": ToolSpec(
                 name="climate_control",
                 description="Control vehicle climate settings including temperature, fan speed, and AC",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "command": {"type": "string", "description": "Climate control command"}
+                        "action": {
+                            "type": "string",
+                            "enum": ["set_temperature", "adjust_temperature", "set_fan_speed", "adjust_fan_speed", "set_mode", "toggle_ac", "toggle_defrost", "turn_off"],
+                            "description": "The climate control action to perform"
+                        },
+                        "temperature": {"type": "integer", "minimum": 60, "maximum": 85, "description": "Target temperature in Fahrenheit"},
+                        "temperature_adjustment": {"type": "integer", "minimum": -10, "maximum": 10, "description": "Temperature change in degrees"},
+                        "fan_speed": {"type": "integer", "minimum": 0, "maximum": 7, "description": "Fan speed level"},
+                        "fan_adjustment": {"type": "integer", "minimum": -3, "maximum": 3, "description": "Fan speed change"},
+                        "mode": {"type": "string", "enum": ["auto", "heat", "cool", "defrost", "vent"], "description": "Climate mode"},
+                        "enable": {"type": "boolean", "description": "Enable/disable for toggle actions"}
                     },
-                    "required": ["command"],
+                    "required": ["action"],
                 },
             ),
             "window_control": ToolSpec(
@@ -82,9 +100,20 @@ class ToolRegistry:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "command": {"type": "string", "description": "Window control command"}
+                        "action": {
+                            "type": "string",
+                            "enum": ["open", "close", "set_position", "vent", "express_up", "express_down", "toggle_child_lock"],
+                            "description": "The window control action to perform"
+                        },
+                        "target": {
+                            "type": "string",
+                            "enum": ["driver", "passenger", "rear_left", "rear_right", "rear", "all", "sunroof"],
+                            "description": "Which window(s) to control"
+                        },
+                        "position": {"type": "integer", "minimum": 0, "maximum": 100, "description": "Window position percentage"},
+                        "enable": {"type": "boolean", "description": "Enable/disable for toggle actions"}
                     },
-                    "required": ["command"],
+                    "required": ["action", "target"],
                 },
             ),
             "seat_control": ToolSpec(
@@ -93,9 +122,20 @@ class ToolRegistry:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "command": {"type": "string", "description": "Seat control command"}
+                        "action": {
+                            "type": "string",
+                            "enum": ["adjust_position", "set_heating", "set_cooling", "adjust_lumbar", "save_memory", "recall_memory"],
+                            "description": "The seat control action to perform"
+                        },
+                        "seat": {"type": "string", "enum": ["driver", "passenger"], "description": "Which seat to control"},
+                        "position_type": {"type": "string", "enum": ["forward", "height", "tilt"], "description": "Type of position adjustment"},
+                        "adjustment": {"type": "integer", "minimum": -20, "maximum": 20, "description": "Position adjustment amount"},
+                        "heating_level": {"type": "integer", "minimum": 0, "maximum": 3, "description": "Seat heating level"},
+                        "cooling_level": {"type": "integer", "minimum": 0, "maximum": 3, "description": "Seat cooling level"},
+                        "lumbar_adjustment": {"type": "integer", "minimum": -5, "maximum": 5, "description": "Lumbar support adjustment"},
+                        "memory_slot": {"type": "integer", "minimum": 1, "maximum": 3, "description": "Memory slot number"}
                     },
-                    "required": ["command"],
+                    "required": ["action", "seat"],
                 },
             ),
             "lighting_control": ToolSpec(
@@ -104,9 +144,19 @@ class ToolRegistry:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "command": {"type": "string", "description": "Lighting control command"}
+                        "action": {
+                            "type": "string",
+                            "enum": ["set_headlights", "set_interior", "set_ambient", "set_reading", "toggle_auto"],
+                            "description": "The lighting control action to perform"
+                        },
+                        "headlight_mode": {"type": "string", "enum": ["off", "on", "auto", "high_beam"], "description": "Headlight mode setting"},
+                        "interior_brightness": {"type": "integer", "minimum": 0, "maximum": 100, "description": "Interior light brightness percentage"},
+                        "ambient_color": {"type": "string", "enum": ["white", "blue", "red", "green", "purple", "orange"], "description": "Ambient lighting color"},
+                        "ambient_brightness": {"type": "integer", "minimum": 0, "maximum": 100, "description": "Ambient lighting brightness percentage"},
+                        "reading_light": {"type": "string", "enum": ["driver", "passenger", "rear_left", "rear_right", "all"], "description": "Which reading light to control"},
+                        "enable": {"type": "boolean", "description": "Enable/disable for toggle actions"}
                     },
-                    "required": ["command"],
+                    "required": ["action"],
                 },
             ),
             "drive_mode": ToolSpec(
@@ -115,9 +165,15 @@ class ToolRegistry:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "command": {"type": "string", "description": "Drive mode command"}
+                        "action": {
+                            "type": "string",
+                            "enum": ["set_mode", "toggle_traction", "toggle_stability", "toggle_lane_assist", "toggle_cruise"],
+                            "description": "The drive mode action to perform"
+                        },
+                        "mode": {"type": "string", "enum": ["normal", "sport", "eco", "snow"], "description": "Drive mode setting"},
+                        "enable": {"type": "boolean", "description": "Enable/disable for toggle actions"}
                     },
-                    "required": ["command"],
+                    "required": ["action"],
                 },
             ),
         }
@@ -147,13 +203,31 @@ class ToolRegistry:
 class DataGenerator:
     """Generate synthetic training data for tool calling using foundation models"""
 
-    def __init__(self, tool_registry: Optional[ToolRegistry] = None):
+    def __init__(self, tool_registry: Optional[ToolRegistry] = None, model_name: str = "Qwen/Qwen3-1.7B"):
         self.tool_registry = tool_registry or ToolRegistry()
         self.llm_client = self._setup_llm_client()
+        self.model_name = model_name
+        self.tokenizer = self._setup_tokenizer()
 
     def _setup_llm_client(self):
         """Setup foundation model client for AWS Bedrock"""
         return boto3.client("bedrock-runtime", region_name=os.getenv("AWS_REGION", DEFAULT_REGION))
+
+    def _setup_tokenizer(self):
+        """Setup tokenizer for chat template formatting"""
+        if not HAS_TRANSFORMERS:
+            return None
+
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            # Ensure we have a chat template
+            if not hasattr(tokenizer, 'chat_template') or tokenizer.chat_template is None:
+                print(f"Warning: {self.model_name} doesn't have a chat template. Using manual formatting.")
+                return None
+            return tokenizer
+        except Exception as e:
+            print(f"Warning: Could not load tokenizer for {self.model_name}: {e}")
+            return None
 
     # ====================================================================
     # LLM Generation Methods
@@ -226,41 +300,131 @@ class DataGenerator:
     
     def _generate_fallback_response(self, prompt: str) -> str:
         """Generate a fallback response when LLM is unavailable"""
-        # Simple fallback responses based on prompt content
+        # Determine if this is for conversational or direct style
+        is_conversational = "conversational" in prompt.lower()
+
+        # Fallback responses based on prompt content and style
         if "climate_control" in prompt.lower():
-            return "Set the temperature to 72 degrees"
+            if is_conversational:
+                return random.choice([
+                    "It's getting too warm in here",
+                    "I'm feeling a bit cold",
+                    "It's stuffy, can you help with the air?"
+                ])
+            else:
+                return random.choice([
+                    "Set the temperature to 72 degrees",
+                    "Turn up the heat by 5 degrees",
+                    "Set fan speed to maximum"
+                ])
         elif "window_control" in prompt.lower():
-            return "Open the driver window"
+            if is_conversational:
+                return random.choice([
+                    "It's getting stuffy in here",
+                    "I need some fresh air",
+                    "It's too hot with the windows closed"
+                ])
+            else:
+                return random.choice([
+                    "Open the driver window",
+                    "Close all windows",
+                    "Open windows halfway"
+                ])
         elif "seat_control" in prompt.lower():
-            return "Adjust my seat position"
+            if is_conversational:
+                return random.choice([
+                    "My back is bothering me",
+                    "I'm not comfortable in this position",
+                    "I'm feeling a bit cold"
+                ])
+            else:
+                return random.choice([
+                    "Move seat forward 3 inches",
+                    "Turn on seat heating level 2",
+                    "Adjust lumbar support"
+                ])
         elif "lighting_control" in prompt.lower():
-            return "Turn on the headlights"
+            if is_conversational:
+                return random.choice([
+                    "I can't see well, it's pretty dark",
+                    "It's too bright in here",
+                    "The mood lighting would be nice"
+                ])
+            else:
+                return random.choice([
+                    "Turn on the headlights",
+                    "Set ambient lighting to blue",
+                    "Turn on reading lights"
+                ])
         elif "drive_mode" in prompt.lower():
-            return "Switch to sport mode"
-        elif "select_model" in prompt.lower():
-            return "What's the weather like today?"
+            if is_conversational:
+                return random.choice([
+                    "I want to have some fun driving today",
+                    "I need to save fuel on this trip",
+                    "The roads are slippery today"
+                ])
+            else:
+                return random.choice([
+                    "Switch to sport mode",
+                    "Enable eco mode",
+                    "Set to snow mode"
+                ])
         else:
             return "Help me with this task"
 
     def _generate_user_request(self, tool_spec: ToolSpec) -> str:
         """Generate realistic user request for the specified tool"""
-        prompt = f"""Generate a realistic user request for a vehicle AI assistant that would trigger the "{tool_spec.name}" tool.
+
+        # Favor direct commands over conversational (70% direct, 30% conversational)
+        style = random.choices(["direct", "conversational"], weights=[70, 30])[0]
+
+        if style == "conversational":
+            prompt = f"""Generate a realistic conversational user request for a vehicle AI assistant that would trigger the "{tool_spec.name}" tool.
 
 Tool description: {tool_spec.description}
 
 Context: This is for a TechCar Model X vehicle with an AI assistant. The user is driving or inside the vehicle.
 
 Requirements:
-- Make it natural and conversational
+- Make it natural and conversational (not a direct command)
+- Express a need or situation rather than giving specific instructions
 - Use automotive context and terminology
 - Make it sound like something someone would actually say in a car
 - Keep it concise (1-2 sentences max)
 - Don't mention the tool name directly
 
-Examples of good requests:
+Examples of good conversational requests:
 - "It's getting too warm in here" (for climate_control)
-- "Open the driver side window" (for window_control)  
-- "Switch to sport mode" (for drive_mode)
+- "I can't see well, it's pretty dark" (for lighting_control)
+- "I'm feeling a bit stiff, my back is bothering me" (for seat_control)
+- "It's getting stuffy in here" (for window_control)
+- "I want to have some fun driving today" (for drive_mode)
+
+Generate just the user request, nothing else:"""
+        else:  # direct style
+            prompt = f"""Generate a realistic direct command for a vehicle AI assistant that would trigger the "{tool_spec.name}" tool.
+
+Tool description: {tool_spec.description}
+
+Context: This is for a TechCar Model X vehicle with an AI assistant. The user is driving or inside the vehicle.
+
+Requirements:
+- Make it a clear, direct command with specific details
+- Include specific values, positions, or settings when appropriate
+- Use automotive context and terminology
+- Make it sound like something someone would actually say in a car
+- Keep it concise (1-2 sentences max)
+- Don't mention the tool name directly
+
+Examples of good direct commands:
+- "Set the temperature to 72 degrees" (for climate_control)
+- "Turn on the headlights" (for lighting_control)
+- "Move my seat forward by 3 inches" (for seat_control)
+- "Open the driver window halfway" (for window_control)
+- "Switch to eco mode" (for drive_mode)
+- "Turn up the heat by 5 degrees" (for climate_control)
+- "Close all the windows" (for window_control)
+- "Set ambient lighting to blue at 70%" (for lighting_control)
 
 Generate just the user request, nothing else:"""
 
@@ -269,7 +433,7 @@ Generate just the user request, nothing else:"""
         lines = result.strip().split("\n")
         for line in lines:
             line = line.strip().strip('"').strip("'")
-            if line and not line.startswith(("Generate", "User:", "Request:", "Query:")):
+            if line and not line.startswith(("Generate", "User:", "Request:", "Query:", "Command:")):
                 return line
 
         # Fallback to first line if no clean line found
@@ -279,82 +443,139 @@ Generate just the user request, nothing else:"""
     # Conversation Generation Methods
     # ====================================================================
 
-    def generate_tool_call(self, tool_spec: ToolSpec, user_input: str) -> Dict[str, Any]:
+    def generate_tool_call(self, tool_spec: ToolSpec) -> Dict[str, Any]:
         """Generate a tool call in Strands format"""
 
-        # Generate parameters based on tool spec and user input
-        params = self._generate_parameters(tool_spec, user_input)
+        # Generate parameters based on tool spec
+        params = self._generate_parameters(tool_spec)
 
         return {
             "toolUse": {
                 "toolUseId": f"call_{uuid.uuid4().hex[:8]}",
-                "name": tool_spec.name,
-                "input": params,
+                "name": tool_spec.name,  # Use correct tool name (domain)
+                "input": params,  # Include action parameter
             }
         }
 
-    def _generate_parameters(self, tool_spec: ToolSpec, user_input: str = "") -> Dict[str, Any]:
-        """Generate valid parameters for a tool based on actual tool signatures"""
+    def _generate_parameters(self, tool_spec: ToolSpec) -> Dict[str, Any]:
+        """Generate valid structured parameters for a tool based on actual tool signatures"""
         params = {}
         properties = tool_spec.parameters.get("properties", {})
         required = tool_spec.parameters.get("required", [])
 
-        # Most tools just take a command or query string
-        if "command" in properties:
-            params["command"] = user_input or self._generate_command(tool_spec.name)
-        elif "query" in properties:
-            params["query"] = user_input or self._generate_query(tool_spec.name)
-        elif "image_query" in properties and random.random() > 0.5:
-            params["image_query"] = "What does this show?"
-        elif "duration" in properties and random.random() > 0.7:
-            params["duration"] = random.randint(3, 10)
-
-        # Add other required parameters
-        for prop_name in required:
-            if prop_name not in params:
+        # Generate parameters based on tool type
+        if tool_spec.name == "climate_control":
+            params = self._generate_climate_params()
+        elif tool_spec.name == "window_control":
+            params = self._generate_window_params()
+        elif tool_spec.name == "seat_control":
+            params = self._generate_seat_params()
+        elif tool_spec.name == "lighting_control":
+            params = self._generate_lighting_params()
+        elif tool_spec.name == "drive_mode":
+            params = self._generate_drive_mode_params()
+        else:
+            # Fallback for other tools - generate based on schema
+            for prop_name in required:
                 params[prop_name] = self._generate_value(properties[prop_name])
 
         return params
 
-    def _generate_command(self, tool_name: str) -> str:
-        """Generate a command string for cockpit control tools"""
-        prompt = f"""Generate a short, natural command that a driver would give to control the "{tool_name}" system in their vehicle.
+    def _generate_climate_params(self) -> Dict[str, Any]:
+        """Generate realistic climate control parameters"""
+        actions = ["set_temperature", "adjust_temperature", "set_fan_speed", "adjust_fan_speed", "set_mode", "toggle_ac", "toggle_defrost", "turn_off"]
+        action = random.choice(actions)
+        params = {"action": action}
 
-Requirements:
-- Keep it conversational and natural
-- 3-8 words maximum
-- Don't mention the tool name directly
-- Sound like something said while driving
+        if action == "set_temperature":
+            params["temperature"] = random.randint(65, 80)
+        elif action == "adjust_temperature":
+            params["temperature_adjustment"] = random.choice([-5, -3, -2, 2, 3, 5])
+        elif action == "set_fan_speed":
+            params["fan_speed"] = random.randint(0, 7)
+        elif action == "adjust_fan_speed":
+            params["fan_adjustment"] = random.choice([-2, -1, 1, 2])
+        elif action == "set_mode":
+            params["mode"] = random.choice(["auto", "heat", "cool", "defrost", "vent"])
+        elif action in ["toggle_ac", "toggle_defrost"]:
+            params["enable"] = random.choice([True, False])
 
-Examples for different systems:
-- "Set temperature to 70"
-- "Open driver window halfway"
-- "Turn on seat heating"
+        return params
 
-Generate just the command:"""
+    def _generate_window_params(self) -> Dict[str, Any]:
+        """Generate realistic window control parameters"""
+        actions = ["open", "close", "set_position", "vent", "express_up", "express_down", "toggle_child_lock"]
+        targets = ["driver", "passenger", "rear_left", "rear_right", "rear", "all", "sunroof"]
 
-        result = self._generate_with_llm(prompt)
-        return result.strip().strip('"').strip("'")
+        action = random.choice(actions)
+        target = random.choice(targets)
+        params = {"action": action, "target": target}
 
-    def _generate_query(self, tool_name: str) -> str:
-        """Generate a query string for assistant tools"""
-        prompt = f"""Generate a short, natural question or request that a driver would ask the "{tool_name}" assistant in their vehicle.
+        if action == "set_position":
+            params["position"] = random.choice([0, 25, 50, 75, 100])
+        elif action == "toggle_child_lock":
+            params["enable"] = random.choice([True, False])
 
-Requirements:
-- Keep it conversational and natural
-- 5-12 words maximum
-- Sound like something said while driving
-- Don't mention the tool name directly
+        return params
 
-Examples for different systems:
-- "Turn on the heated seats"
-- "Set cruise control"
-- "Adjust the mirrors"
+    def _generate_seat_params(self) -> Dict[str, Any]:
+        """Generate realistic seat control parameters"""
+        actions = ["adjust_position", "set_heating", "set_cooling", "adjust_lumbar", "save_memory", "recall_memory"]
+        seats = ["driver", "passenger"]
 
-Generate just the query:"""
+        action = random.choice(actions)
+        seat = random.choice(seats)
+        params = {"action": action, "seat": seat}
 
-        result = self._generate_with_llm(prompt)
-        return result.strip().strip('"').strip("'")
+        if action == "adjust_position":
+            params["position_type"] = random.choice(["forward", "height", "tilt"])
+            params["adjustment"] = random.choice([-15, -10, -5, 5, 10, 15])
+        elif action == "set_heating":
+            params["heating_level"] = random.randint(0, 3)
+        elif action == "set_cooling":
+            params["cooling_level"] = random.randint(0, 3)
+        elif action == "adjust_lumbar":
+            params["lumbar_adjustment"] = random.choice([-3, -2, -1, 1, 2, 3])
+        elif action in ["save_memory", "recall_memory"]:
+            params["memory_slot"] = random.randint(1, 3)
+
+        return params
+
+    def _generate_lighting_params(self) -> Dict[str, Any]:
+        """Generate realistic lighting control parameters"""
+        actions = ["set_headlights", "set_interior", "set_ambient", "set_reading", "toggle_auto"]
+        action = random.choice(actions)
+        params = {"action": action}
+
+        if action == "set_headlights":
+            params["headlight_mode"] = random.choice(["off", "on", "auto", "high_beam"])
+        elif action == "set_interior":
+            params["interior_brightness"] = random.choice([0, 25, 50, 75, 100])
+        elif action == "set_ambient":
+            params["ambient_color"] = random.choice(["white", "blue", "red", "green", "purple", "orange"])
+            params["ambient_brightness"] = random.choice([30, 50, 70, 100])
+        elif action == "set_reading":
+            params["reading_light"] = random.choice(["driver", "passenger", "rear_left", "rear_right", "all"])
+            params["enable"] = random.choice([True, False])
+        elif action == "toggle_auto":
+            params["enable"] = random.choice([True, False])
+
+        return params
+
+    def _generate_drive_mode_params(self) -> Dict[str, Any]:
+        """Generate realistic drive mode parameters"""
+        actions = ["set_mode", "toggle_traction", "toggle_stability", "toggle_lane_assist", "toggle_cruise"]
+        action = random.choice(actions)
+        params = {"action": action}
+
+        if action == "set_mode":
+            params["mode"] = random.choice(["normal", "sport", "eco", "snow"])
+        else:
+            params["enable"] = random.choice([True, False])
+
+        return params
+
+# Deprecated methods removed - no longer needed with structured parameters
 
     def _generate_value(self, spec: Dict[str, Any]) -> Any:
         """Generate value based on JSON schema specification"""
@@ -399,7 +620,7 @@ Generate just the query:"""
         messages.append(
             {
                 "role": "system",
-                "content": "You are an AI assistant with access to various tools. Use them to help users effectively.",
+                "content": "You are an AI assistant with access to various tools. Use them to help users effectively.\n\n/no_think",
             }
         )
 
@@ -407,19 +628,8 @@ Generate just the query:"""
         user_content = self._generate_user_message(tools[0], include_multimodal)
         messages.append({"role": "user", "content": user_content})
 
-        # Extract text from user content for tool call
-        user_text = user_content
-        if isinstance(user_content, list):
-            # Extract text from multimodal content
-            for item in user_content:
-                if isinstance(item, dict) and "text" in item:
-                    user_text = item["text"]
-                    break
-
         # Assistant response with tool call
-        tool_call = self.generate_tool_call(
-            tools[0], user_text if isinstance(user_text, str) else ""
-        )
+        tool_call = self.generate_tool_call(tools[0])
         assistant_response = self._format_assistant_response(tool_call)
         messages.append({"role": "assistant", "content": assistant_response})
 
@@ -519,51 +729,121 @@ Generate just the response:"""
         return lines[0].strip().strip('"').strip("'") if lines else "Task completed successfully."
 
     def convert_to_training_format(self, conversation: Dict) -> str:
-        """Convert Strands format to plain text training format for llama.cpp
-        
-        This matches the format that llama.cpp expects AFTER Jinja processing.
-        No chat template tokens, just plain text with XML tool tags.
-        """
-        lines = []
-        
-        # Add tools section
-        lines.append("# Tools")
-        lines.append("<tools>")
+        """Convert Strands format to training format using chat templates when available"""
+
+        if self.tokenizer and hasattr(self.tokenizer, 'chat_template'):
+            return self._format_with_chat_template(conversation)
+        else:
+            return self._format_manually(conversation)
+
+    def _format_with_chat_template(self, conversation: Dict) -> str:
+        """Format conversation using tokenizer's chat template"""
+
+        # Convert Strands format to standard chat format
+        messages = []
+
+        # Add system message with tools
+        tools_info = []
         for tool in conversation.get('tools', []):
-            lines.append(f"{tool['name']}: {tool['description']}")
-        lines.append("</tools>")
+            tool_desc = f"{tool['name']}: {tool['description']}"
+            if 'inputSchema' in tool and 'json' in tool['inputSchema']:
+                schema = tool['inputSchema']['json']
+                if 'properties' in schema:
+                    params = []
+                    for param, spec in schema['properties'].items():
+                        param_desc = f"{param} ({spec.get('type', 'any')})"
+                        if 'description' in spec:
+                            param_desc += f": {spec['description']}"
+                        params.append(param_desc)
+                    tool_desc += f" - Parameters: {', '.join(params)}"
+            tools_info.append(tool_desc)
+
+        system_content = "You are a helpful AI assistant with access to these specific vehicle control tools:\n\n- climate_control: Control temperature, fan speed, AC (action, temperature, fan_speed, mode, enable)\n- window_control: Control windows and sunroof (action, target, position, enable)\n- seat_control: Control seat position and heating (action, seat, position, heating_level, memory_slot)\n- lighting_control: Control headlights and ambient lighting (action, light_type, brightness, ambient_color)\n- drive_mode: Control driving modes (action, mode, toggle)\n\nUse the exact tool names above. Respond with: <tool_call>{\"name\": \"tool_name\", \"arguments\": {\"action\": \"action_name\", \"param\": \"value\"}}</tool_call>\n\n/no_think"
+        messages.append({"role": "system", "content": system_content})
+
+        # Process conversation messages
+        for msg in conversation.get('messages', []):
+            if msg['role'] == 'system':
+                continue  # Skip system messages as we already added our own
+
+            elif msg['role'] == 'user':
+                content = self._extract_user_content(msg)
+                if content:
+                    messages.append({"role": "user", "content": content})
+
+            elif msg['role'] == 'assistant':
+                content = self._extract_assistant_content(msg)
+                if content:
+                    messages.append({"role": "assistant", "content": content})
+
+        # Apply chat template
+        try:
+            formatted = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=False
+            )
+            return formatted
+        except Exception as e:
+            print(f"Warning: Chat template failed: {e}. Falling back to manual formatting.")
+            return self._format_manually(conversation)
+
+    def _extract_user_content(self, msg: Dict) -> str:
+        """Extract user content from message"""
+        if isinstance(msg['content'], str):
+            return msg['content']
+        elif isinstance(msg['content'], list):
+            parts = []
+            for item in msg['content']:
+                if 'toolResult' in item:
+                    for c in item['toolResult'].get('content', []):
+                        if 'text' in c:
+                            parts.append(f"[Tool Result: {c['text']}]")
+                elif 'text' in item:
+                    parts.append(item['text'])
+            return " ".join(parts)
+        return ""
+
+    def _extract_assistant_content(self, msg: Dict) -> str:
+        """Extract assistant content from message, including tool calls"""
+        if isinstance(msg['content'], str):
+            return msg['content']
+        elif isinstance(msg['content'], list):
+            parts = []
+            for item in msg['content']:
+                if 'text' in item:
+                    parts.append(item['text'])
+                elif 'toolUse' in item:
+                    tool_call = {
+                        "name": item['toolUse']['name'],
+                        "arguments": item['toolUse']['input']
+                    }
+                    parts.append(f"<tool_call>\n{json.dumps(tool_call, indent=2)}\n</tool_call>")
+            return " ".join(parts)
+        return ""
+
+    def _format_manually(self, conversation: Dict) -> str:
+        """Fallback manual formatting when chat template is not available"""
+        lines = []
+
+        # Add tools section
+        lines.append("# Available Tools")
+        for tool in conversation.get('tools', []):
+            lines.append(f"- {tool['name']}: {tool['description']}")
         lines.append("")
-        
+
         # Process messages
         for msg in conversation.get('messages', []):
             if msg['role'] == 'user':
-                if isinstance(msg['content'], str):
-                    lines.append(f"User: {msg['content']}")
-                elif isinstance(msg['content'], list):
-                    for item in msg['content']:
-                        if 'toolResult' in item:
-                            for c in item['toolResult'].get('content', []):
-                                if 'text' in c:
-                                    lines.append(f"Tool Result: {c['text']}")
-                        elif 'text' in item:
-                            lines.append(f"User: {item['text']}")
-                            
+                content = self._extract_user_content(msg)
+                if content:
+                    lines.append(f"User: {content}")
+
             elif msg['role'] == 'assistant':
-                if isinstance(msg['content'], str):
-                    lines.append(f"Assistant: {msg['content']}")
-                elif isinstance(msg['content'], list):
-                    for item in msg['content']:
-                        if 'text' in item:
-                            lines.append(f"Assistant: {item['text']}")
-                        elif 'toolUse' in item:
-                            lines.append("Assistant: <tool_call>")
-                            tool_data = {
-                                "name": item['toolUse']['name'],
-                                "arguments": item['toolUse']['input']
-                            }
-                            lines.append(json.dumps(tool_data))
-                            lines.append("</tool_call>")
-        
+                content = self._extract_assistant_content(msg)
+                if content:
+                    lines.append(f"Assistant: {content}")
+
         return "\n".join(lines)
 
     def generate_dataset(
@@ -621,33 +901,59 @@ Generate just the response:"""
 
 
 def main():
-    """Generate training and test datasets in correct format"""
-    
-    # Initialize generator
+    """Generate training and test datasets with structured parameters and chat templates"""
+
+    # Initialize generator with default model
     generator = DataGenerator()
-    
-    print("Generating training dataset with ONLY production tools...")
-    print("Tools: climate_control, window_control, seat_control, lighting_control, drive_mode")
+
+    print("🚀 STRUCTURED PARAMETER TOOL CALLING DATASET GENERATOR")
+    print("=" * 60)
+    print("✅ Refactored to use structured parameters instead of natural language commands")
+    print("✅ Using proper chat templates when available (transformers)")
+    print("✅ Fallback to manual formatting when needed")
+    print()
+    print("Production Tools:")
+    for tool_name in generator.tool_registry.tools.keys():
+        tool = generator.tool_registry.tools[tool_name]
+        print(f"  - {tool_name}: {tool.description}")
+    print()
+
+    # Check if we have chat template support
+    if generator.tokenizer:
+        print(f"🎯 Using chat template from: {generator.model_name}")
+    else:
+        print("⚠️  Using manual formatting (transformers not available)")
     print("-" * 60)
-    
-    # Generate training data in correct format
+
+    # Generate training data
+    print("Generating training dataset...")
     generator.generate_dataset(
         num_examples=500,
-        output_path="data/train_formatted.jsonl",
-        format_for_training=True  # Convert to plain text format
+        output_path="data/train_structured.jsonl",
+        format_for_training=True
     )
-    
-    # Generate test data in correct format
+
+    # Generate test data
     print("\nGenerating test dataset...")
     generator.generate_dataset(
         num_examples=100,
-        output_path="data/test_formatted.jsonl",
-        format_for_training=True  # Convert to plain text format
+        output_path="data/test_structured.jsonl",
+        format_for_training=True
     )
-    
-    print("\nDatasets generated successfully!")
-    print("Format: Plain text with <tool_call> XML tags")
-    print("Ready for fine-tuning with the fixed notebook!")
+
+    print("\n🎉 DATASETS GENERATED SUCCESSFULLY!")
+    print("=" * 60)
+    print("📁 Files created:")
+    print("  - data/train_structured.jsonl (500 examples)")
+    print("  - data/test_structured.jsonl (100 examples)")
+    print()
+    print("🔧 Format improvements:")
+    print("  ✅ Structured parameters instead of natural language commands")
+    print("  ✅ Proper chat template formatting when available")
+    print("  ✅ Tool calls with JSON parameters")
+    print("  ✅ Better validation and error handling")
+    print()
+    print("🚀 Ready for fine-tuning!")
 
 
 if __name__ == "__main__":

@@ -5,27 +5,30 @@ Supports TechCar Model X and AutoDrive CX-7
 
 import logging
 from strands import tool
-from ...data.vehicle_systems import get_virtual_ecu
+from data.vehicle_systems import get_virtual_ecu
 
 logger = logging.getLogger(__name__)
 
 
 @tool
-def drive_mode(command: str) -> str:
+def drive_mode(
+    action: str,
+    mode: str = None,
+    enable: bool = None
+) -> str:
     """
     Control vehicle drive mode and dynamics settings for different driving conditions.
     Safety: Mode changes only allowed below 5 mph.
 
-    Examples:
-    - "Switch to sport mode"
-    - "Enable eco mode"
-    - "Set to snow mode"
-    - "Turn on traction control"
-    - "I want better fuel economy" (will enable eco mode)
-    - "It's snowing" (will enable snow mode)
-
     Args:
-        command: Natural language drive mode request
+        action: The drive mode action to perform. Options:
+            - "set_mode": Set drive mode
+            - "toggle_traction": Toggle traction control
+            - "toggle_stability": Toggle stability control
+            - "toggle_lane_assist": Toggle lane keeping assist
+            - "toggle_cruise": Toggle adaptive cruise control
+        mode: Drive mode for set_mode ("normal", "sport", "eco", "snow")
+        enable: Enable/disable for toggle actions
 
     Returns:
         Confirmation of mode change with performance impact
@@ -34,155 +37,108 @@ def drive_mode(command: str) -> str:
     current_mode = ecu.get_state("drive_mode")
     vehicle_info = ecu.get_state("vehicle_info")
 
-    # Safety check for mode changes
-    if vehicle_info["speed"] > 5 and "mode" in command.lower():
-        return f"⚠️ Safety: Cannot change drive mode at {vehicle_info['speed']} mph. Please slow down below 5 mph."
-
-    command_lower = command.lower()
-
     try:
-        # Drive mode selection
-        if any(word in command_lower for word in ["sport", "sporty", "performance", "fun"]):
-            result = ecu.execute_command(
-                {"component": "drive_mode", "action": "set_mode", "value": "sport"}
-            )
-            additional_info = """
-Sport mode engaged:
+        # Validate action parameter
+        valid_actions = ["set_mode", "toggle_traction", "toggle_stability", "toggle_lane_assist", "toggle_cruise"]
+        if action not in valid_actions:
+            return f"Invalid action '{action}'. Valid actions: {', '.join(valid_actions)}"
+
+        # Safety check for mode changes
+        if action == "set_mode" and vehicle_info["speed"] > 5:
+            return f"⚠️ Safety: Cannot change drive mode at {vehicle_info['speed']} mph. Please slow down below 5 mph."
+
+        # Handle drive mode setting
+        if action == "set_mode":
+            if mode is None:
+                return "Mode value required for set_mode action"
+            valid_modes = ["normal", "sport", "eco", "snow"]
+            if mode not in valid_modes:
+                return f"Invalid mode '{mode}'. Valid modes: {', '.join(valid_modes)}"
+
+            result = ecu.execute_command({
+                "component": "drive_mode", "action": "set_mode", "value": mode
+            })
+
+            # Add mode-specific information
+            mode_info = {
+                "sport": """Sport mode engaged:
 - Enhanced throttle response for quicker acceleration
 - Firmer steering feel for better feedback
 - Tighter suspension (AutoDrive CX-7)
 - Engine sound enhancement active
-- Fuel economy reduced by ~15%"""
-
-        elif any(
-            word in command_lower
-            for word in ["eco", "economy", "efficient", "save fuel", "better fuel"]
-        ):
-            result = ecu.execute_command(
-                {"component": "drive_mode", "action": "set_mode", "value": "eco"}
-            )
-            additional_info = """
-Eco mode engaged:
+- Fuel economy reduced by ~15%""",
+                "eco": """Eco mode engaged:
 - Optimized throttle for fuel efficiency
 - Earlier upshifts for lower RPM
 - Climate control optimization
 - Regenerative braking enhanced
-- Fuel economy improved by ~10-15%"""
-
-        elif any(
-            word in command_lower
-            for word in ["snow", "snowing", "ice", "icy", "slippery", "winter"]
-        ):
-            result = ecu.execute_command(
-                {"component": "drive_mode", "action": "set_mode", "value": "snow"}
-            )
-            additional_info = """
-Snow mode engaged:
+- Fuel economy improved by ~10-15%""",
+                "snow": """Snow mode engaged:
 - Gentle throttle response to prevent wheel spin
 - Second gear starts for better traction
 - Enhanced traction control
 - Stability control maximized
-- All-wheel drive optimized (if equipped)"""
-
-        elif any(word in command_lower for word in ["normal", "comfort", "regular", "standard"]):
-            result = ecu.execute_command(
-                {"component": "drive_mode", "action": "set_mode", "value": "normal"}
-            )
-            additional_info = """
-Normal mode engaged:
+- All-wheel drive optimized (if equipped)""",
+                "normal": """Normal mode engaged:
 - Balanced performance and comfort
 - Standard throttle response
 - Comfort-oriented suspension
 - Optimal fuel economy
 - All systems in default state"""
+            }
+            additional_info = mode_info.get(mode, "")
+        # Handle traction control toggle
+        elif action == "toggle_traction":
+            if enable is None:
+                enable = not current_mode["traction_control"]  # Toggle current state
 
-        # Traction control
-        elif "traction" in command_lower:
-            if "off" in command_lower or "disable" in command_lower:
-                if vehicle_info["speed"] > 0:
-                    return "⚠️ Safety: Cannot disable traction control while vehicle is moving."
-                value = False
-            elif "on" in command_lower or "enable" in command_lower:
-                value = True
-            else:
-                value = not current_mode["traction_control"]  # Toggle
+            # Safety check for disabling while moving
+            if not enable and vehicle_info["speed"] > 0:
+                return "⚠️ Safety: Cannot disable traction control while vehicle is moving."
 
-            result = ecu.execute_command(
-                {"component": "drive_mode", "action": "toggle_traction", "value": value}
-            )
-            additional_info = (
-                f"Traction control {'enabled' if value else 'disabled (use caution!)'}"
-            )
+            result = ecu.execute_command({
+                "component": "drive_mode", "action": "toggle_traction", "value": enable
+            })
+            additional_info = f"Traction control {'enabled' if enable else 'disabled (use caution!)'}"
 
-        # Stability control
-        elif "stability" in command_lower or "esc" in command_lower:
-            if "off" in command_lower or "disable" in command_lower:
-                if vehicle_info["speed"] > 0:
-                    return "⚠️ Safety: Cannot disable stability control while vehicle is moving."
-                value = False
-            elif "on" in command_lower or "enable" in command_lower:
-                value = True
-            else:
-                value = not current_mode["stability_control"]  # Toggle
+        # Handle stability control toggle
+        elif action == "toggle_stability":
+            if enable is None:
+                enable = not current_mode["stability_control"]  # Toggle current state
 
-            result = ecu.execute_command(
-                {"component": "drive_mode", "action": "toggle_stability", "value": value}
-            )
-            additional_info = (
-                f"Stability control {'enabled' if value else 'disabled (expert drivers only!)'}"
-            )
+            # Safety check for disabling while moving
+            if not enable and vehicle_info["speed"] > 0:
+                return "⚠️ Safety: Cannot disable stability control while vehicle is moving."
 
-        # Lane assist
-        elif "lane" in command_lower:
-            if "off" in command_lower or "disable" in command_lower:
-                value = False
-            elif "on" in command_lower or "enable" in command_lower:
-                value = True
-            else:
-                value = not current_mode["lane_assist"]  # Toggle
+            result = ecu.execute_command({
+                "component": "drive_mode", "action": "toggle_stability", "value": enable
+            })
+            additional_info = f"Stability control {'enabled' if enable else 'disabled (expert drivers only!)'}"
+        # Handle lane assist toggle
+        elif action == "toggle_lane_assist":
+            if enable is None:
+                enable = not current_mode["lane_assist"]  # Toggle current state
 
-            result = ecu.execute_command(
-                {"component": "drive_mode", "action": "toggle_lane_assist", "value": value}
-            )
-            additional_info = f"Lane keeping assist {'enabled' if value else 'disabled'}"
+            result = ecu.execute_command({
+                "component": "drive_mode", "action": "toggle_lane_assist", "value": enable
+            })
+            additional_info = f"Lane keeping assist {'enabled' if enable else 'disabled'}"
 
-        # Adaptive cruise
-        elif "cruise" in command_lower or "adaptive" in command_lower:
+        # Handle adaptive cruise toggle
+        elif action == "toggle_cruise":
             if vehicle_info["speed"] < 25:
                 return "Adaptive cruise control requires minimum speed of 25 mph"
 
-            if "off" in command_lower or "disable" in command_lower:
-                value = False
-            elif "on" in command_lower or "enable" in command_lower:
-                value = True
-            else:
-                value = not current_mode["adaptive_cruise"]  # Toggle
+            if enable is None:
+                enable = not current_mode["adaptive_cruise"]  # Toggle current state
 
-            result = ecu.execute_command(
-                {"component": "drive_mode", "action": "toggle_cruise", "value": value}
-            )
-            additional_info = f"Adaptive cruise control {'engaged' if value else 'disengaged'}"
+            result = ecu.execute_command({
+                "component": "drive_mode", "action": "toggle_cruise", "value": enable
+            })
+            additional_info = f"Adaptive cruise control {'engaged' if enable else 'disengaged'}"
 
         else:
-            # Show current state
-            return f"""Current drive settings:
-- Mode: {current_mode['current'].upper()}
-- Traction Control: {'On' if current_mode['traction_control'] else 'Off'}
-- Stability Control: {'On' if current_mode['stability_control'] else 'Off'}
-- Lane Assist: {'On' if current_mode['lane_assist'] else 'Off'}
-- Adaptive Cruise: {'On' if current_mode['adaptive_cruise'] else 'Off'}
-- Vehicle Speed: {vehicle_info['speed']} mph
-
-Available modes:
-- Sport: Enhanced performance, reduced economy
-- Eco: Maximum efficiency, gentler acceleration
-- Normal: Balanced comfort and performance
-- Snow: Optimized for slippery conditions
-
-You can say:
-- "Switch to sport mode"
-- "Enable eco mode"
-- "Turn on traction control" """
+            return f"Unknown action '{action}'. Valid actions: {', '.join(valid_actions)}"
 
         # Process result
         if result["success"]:

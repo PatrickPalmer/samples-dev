@@ -181,3 +181,4 @@ cython_debug/
 .cursorindexingignore
 *checkpoint-*/
 *qwen*/
+02-samples/14-agentic-ai-at-the-edge/src/data_science_pipeline/whisper-japanese-finetuned/

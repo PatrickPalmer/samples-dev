@@ -5,26 +5,37 @@ Supports TechCar Model X and AutoDrive CX-7
 
 import logging
 from strands import tool
-from ...data.vehicle_systems import get_virtual_ecu
+from data.vehicle_systems import get_virtual_ecu
 
 logger = logging.getLogger(__name__)
 
 
 @tool
-def lighting_control(command: str) -> str:
+def lighting_control(
+    action: str,
+    headlight_mode: str = None,
+    interior_brightness: int = None,
+    ambient_color: str = None,
+    ambient_brightness: int = None,
+    reading_light: str = None,
+    enable: bool = None
+) -> str:
     """
     Control vehicle interior and exterior lighting including headlights, ambient lighting, and reading lights.
 
-    Examples:
-    - "Turn on headlights"
-    - "Set headlights to auto"
-    - "Turn on ambient lighting blue"
-    - "Dim interior lights"
-    - "Turn on reading light"
-    - "It's dark in here" (will turn on interior lights)
-
     Args:
-        command: Natural language lighting control request
+        action: The lighting control action to perform. Options:
+            - "set_headlights": Set headlight mode
+            - "set_interior": Set interior light brightness
+            - "set_ambient": Set ambient lighting color and brightness
+            - "set_reading": Control reading lights
+            - "toggle_auto": Toggle automatic lighting
+        headlight_mode: Headlight mode for set_headlights ("off", "on", "auto", "high_beam")
+        interior_brightness: Interior light brightness percentage (0-100) for set_interior
+        ambient_color: Ambient lighting color for set_ambient ("white", "blue", "red", "green", "purple", "orange")
+        ambient_brightness: Ambient lighting brightness percentage (0-100) for set_ambient
+        reading_light: Which reading light to control for set_reading ("driver", "passenger", "rear_left", "rear_right", "all")
+        enable: Enable/disable for toggle actions
 
     Returns:
         Confirmation of lighting adjustment
@@ -33,168 +44,92 @@ def lighting_control(command: str) -> str:
     current_lighting = ecu.get_state("lighting")
     vehicle_info = ecu.get_state("vehicle_info")
 
-    command_lower = command.lower()
-
     try:
-        # Headlights control
-        if "headlight" in command_lower or "head light" in command_lower:
-            if "auto" in command_lower:
-                mode = "auto"
-            elif "high" in command_lower or "bright" in command_lower:
-                mode = "high"
-            elif "off" in command_lower:
-                mode = "off"
-            elif "on" in command_lower:
-                mode = "on"
-            elif "parking" in command_lower:
-                mode = "parking"
+        # Validate action parameter
+        valid_actions = ["set_headlights", "set_interior", "set_ambient", "set_reading", "toggle_auto"]
+        if action not in valid_actions:
+            return f"Invalid action '{action}'. Valid actions: {', '.join(valid_actions)}"
+
+        # Handle headlight control
+        if action == "set_headlights":
+            if headlight_mode is None:
+                return "Headlight mode required for set_headlights action"
+            valid_modes = ["off", "on", "auto", "high_beam"]
+            if headlight_mode not in valid_modes:
+                return f"Invalid headlight mode '{headlight_mode}'. Valid modes: {', '.join(valid_modes)}"
+
+            # Map high_beam to the ECU's expected value
+            ecu_mode = "high" if headlight_mode == "high_beam" else headlight_mode
+            result = ecu.execute_command({
+                "component": "lighting", "action": "set_headlights", "value": ecu_mode
+            })
+
+        # Handle interior lighting
+        elif action == "set_interior":
+            if interior_brightness is None:
+                return "Interior brightness required for set_interior action"
+            if not (0 <= interior_brightness <= 100):
+                return "Interior brightness must be between 0 and 100 percent"
+            result = ecu.execute_command({
+                "component": "lighting", "action": "set_interior", "value": interior_brightness
+            })
+
+        # Handle ambient lighting
+        elif action == "set_ambient":
+            if ambient_color is None:
+                return "Ambient color required for set_ambient action"
+            valid_colors = ["white", "blue", "red", "green", "purple", "orange"]
+            if ambient_color not in valid_colors:
+                return f"Invalid ambient color '{ambient_color}'. Valid colors: {', '.join(valid_colors)}"
+
+            # Use provided brightness or default to 60%
+            brightness = ambient_brightness if ambient_brightness is not None else 60
+            if not (0 <= brightness <= 100):
+                return "Ambient brightness must be between 0 and 100 percent"
+
+            result = ecu.execute_command({
+                "component": "lighting",
+                "action": "set_ambient",
+                "color": ambient_color,
+                "intensity": brightness
+            })
+        # Handle reading lights
+        elif action == "set_reading":
+            if reading_light is None:
+                return "Reading light target required for set_reading action"
+            valid_targets = ["driver", "passenger", "rear_left", "rear_right", "all"]
+            if reading_light not in valid_targets:
+                return f"Invalid reading light target '{reading_light}'. Valid targets: {', '.join(valid_targets)}"
+
+            # Use enable parameter or default to toggle
+            if enable is None:
+                if reading_light == "all":
+                    # For "all", turn on if any are off, otherwise turn off
+                    any_on = any(current_lighting["reading"].values())
+                    enable = not any_on
+                else:
+                    enable = not current_lighting["reading"].get(reading_light, False)
+
+            if reading_light == "all":
+                # Control all reading lights
+                for target in ["driver", "passenger", "rear_left", "rear_right"]:
+                    result = ecu.execute_command({
+                        "component": "lighting", "action": "toggle_reading", "target": target, "value": enable
+                    })
             else:
-                mode = "on"  # Default to on
+                result = ecu.execute_command({
+                    "component": "lighting", "action": "toggle_reading", "target": reading_light, "value": enable
+                })
 
-            result = ecu.execute_command(
-                {"component": "lighting", "action": "set_headlights", "value": mode}
-            )
-
-        # Fog lights
-        elif "fog" in command_lower:
-            if "off" in command_lower:
-                value = False
-            elif "on" in command_lower:
-                value = True
-            else:
-                value = not current_lighting["fog_lights"]  # Toggle
-
-            result = ecu.execute_command(
-                {"component": "lighting", "action": "toggle_fog", "value": value}
-            )
-
-        # Ambient lighting
-        elif "ambient" in command_lower or "mood" in command_lower:
-            # Determine color if specified
-            color = "white"  # Default
-            intensity = 60  # Default
-
-            colors = ["red", "blue", "green", "white", "orange", "purple", "yellow"]
-            for c in colors:
-                if c in command_lower:
-                    color = c
-                    break
-
-            # Check intensity
-            if "bright" in command_lower or "max" in command_lower:
-                intensity = 100
-            elif "dim" in command_lower or "low" in command_lower:
-                intensity = 30
-            elif "medium" in command_lower or "normal" in command_lower:
-                intensity = 60
-            else:
-                # Try to extract percentage
-                import re
-
-                percent_match = re.search(r"(\d+)\s*(?:%|percent)?", command_lower)
-                if percent_match:
-                    intensity = min(int(percent_match.group(1)), 100)
-
-            if "off" in command_lower:
-                result = ecu.execute_command(
-                    {
-                        "component": "lighting",
-                        "action": "set_ambient",
-                        "color": color,
-                        "intensity": 0,
-                    }
-                )
-            else:
-                result = ecu.execute_command(
-                    {
-                        "component": "lighting",
-                        "action": "set_ambient",
-                        "color": color,
-                        "intensity": intensity,
-                    }
-                )
-
-        # Interior dome lights
-        elif any(word in command_lower for word in ["interior", "dome", "cabin", "dark"]):
-            if "off" in command_lower:
-                mode = "off"
-            elif "on" in command_lower or "dark" in command_lower:
-                mode = "on"
-            elif "auto" in command_lower:
-                mode = "auto"
-            elif "dim" in command_lower:
-                mode = "dim"
-            elif "bright" in command_lower:
-                mode = "bright"
-            else:
-                mode = "on"  # Default to on
-
-            result = ecu.execute_command(
-                {"component": "lighting", "action": "set_interior", "value": mode}
-            )
-
-        # Reading lights
-        elif "reading" in command_lower or "map" in command_lower:
-            # Determine which reading light
-            if "passenger" in command_lower:
-                target = "passenger"
-            elif "rear left" in command_lower or "back left" in command_lower:
-                target = "rear_left"
-            elif "rear right" in command_lower or "back right" in command_lower:
-                target = "rear_right"
-            elif "rear" in command_lower or "back" in command_lower:
-                target = "rear_left"  # Default to rear left
-            else:
-                target = "driver"  # Default to driver
-
-            if "off" in command_lower:
-                value = False
-            elif "on" in command_lower:
-                value = True
-            else:
-                value = not current_lighting["reading"].get(target, False)  # Toggle
-
-            result = ecu.execute_command(
-                {
-                    "component": "lighting",
-                    "action": "reading_light",
-                    "target": target,
-                    "value": value,
-                }
-            )
-
-        # All lights off
-        elif "all" in command_lower and "off" in command_lower:
-            # Turn off all interior lights
-            result = ecu.execute_command(
-                {"component": "lighting", "action": "set_interior", "value": "off"}
-            )
-            # Also turn off ambient
-            ecu.execute_command({"component": "lighting", "action": "set_ambient", "intensity": 0})
-
-        # All lights on
-        elif "all" in command_lower and "on" in command_lower:
-            result = ecu.execute_command(
-                {"component": "lighting", "action": "set_interior", "value": "on"}
-            )
-
+        # Handle auto toggle
+        elif action == "toggle_auto":
+            if enable is None:
+                enable = not current_lighting.get("auto_mode", False)
+            result = ecu.execute_command({
+                "component": "lighting", "action": "toggle_auto", "value": enable
+            })
         else:
-            # Show current state
-            ambient = current_lighting["ambient"]
-            reading = current_lighting["reading"]
-
-            return f"""Current lighting settings:
-- Headlights: {current_lighting['headlights']}
-- Fog lights: {'On' if current_lighting['fog_lights'] else 'Off'}
-- Interior: {current_lighting['interior_dome']}
-- Ambient: {'On' if ambient['enabled'] else 'Off'} ({ambient['color']}, {ambient['intensity']}%)
-- Reading lights: Driver: {'On' if reading['driver'] else 'Off'}, Passenger: {'On' if reading['passenger'] else 'Off'}
-
-You can say:
-- "Turn on headlights"
-- "Set ambient lighting to blue"
-- "Turn on reading light"
-- "Set headlights to auto" """
+            return f"Unknown action '{action}'. Valid actions: {', '.join(valid_actions)}"
 
         # Process result
         if result["success"]:
