@@ -14,6 +14,7 @@ Key Features:
 
 import json
 import random
+import re
 import uuid
 import boto3
 import os
@@ -33,17 +34,20 @@ except ImportError:
 
 
 # Configuration constants
-DEFAULT_MODEL_ID = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+DEFAULT_MODEL_ID = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+# DEFAULT_MODEL_ID = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
 DEFAULT_REGION = "us-west-2"
 DEFAULT_MAX_TOKENS = 1000
 DEFAULT_TEMPERATURE = 0.7
 
 # Rate limiting configuration
-RATE_LIMIT_DELAY = 1.0  # Base delay between requests in seconds
+# Reduced delays to accelerate data generation.
+# Adjust these values based on your AWS account's rate limits.
+RATE_LIMIT_DELAY = 0.5  # Base delay between requests in seconds
 MAX_RETRIES = 5  # Maximum number of retries for rate-limited requests
 BACKOFF_FACTOR = 2.0  # Exponential backoff multiplier
 BATCH_SIZE = 10  # Process in batches with delays
-BATCH_DELAY = 5.0  # Delay between batches in seconds
+BATCH_DELAY = 2.0  # Delay between batches in seconds
 
 
 @dataclass
@@ -203,15 +207,35 @@ class ToolRegistry:
 class DataGenerator:
     """Generate synthetic training data for tool calling using foundation models"""
 
-    def __init__(self, tool_registry: Optional[ToolRegistry] = None, model_name: str = "Qwen/Qwen3-1.7B"):
+    def __init__(self, tool_registry: Optional[ToolRegistry] = None, model_name: str = "Qwen/Qwen3-1.7B",
+                 aws_access_key_id: str = None, aws_secret_access_key: str = None,
+                 aws_session_token: str = None, aws_profile_name: str = None,
+                 aws_region: str = None):
         self.tool_registry = tool_registry or ToolRegistry()
-        self.llm_client = self._setup_llm_client()
+        self.llm_client = self._setup_llm_client(aws_access_key_id, aws_secret_access_key,
+                                                 aws_session_token, aws_profile_name, aws_region)
         self.model_name = model_name
         self.tokenizer = self._setup_tokenizer()
 
-    def _setup_llm_client(self):
-        """Setup foundation model client for AWS Bedrock"""
-        return boto3.client("bedrock-runtime", region_name=os.getenv("AWS_REGION", DEFAULT_REGION))
+    def _setup_llm_client(self, aws_access_key_id, aws_secret_access_key,
+                          aws_session_token, aws_profile_name, aws_region):
+        """Setup foundation model client for AWS Bedrock with flexible authentication."""
+        region = aws_region or os.getenv("AWS_REGION", DEFAULT_REGION)
+        
+        if aws_access_key_id and aws_secret_access_key:
+            session = boto3.Session(
+                aws_access_key_id=aws_access_key_id,
+                aws_secret_access_key=aws_secret_access_key,
+                aws_session_token=aws_session_token,
+                region_name=region
+            )
+        elif aws_profile_name:
+            session = boto3.Session(profile_name=aws_profile_name, region_name=region)
+        else:
+            # Use default credential chain (env vars, .aws/credentials, IAM role)
+            session = boto3.Session(region_name=region)
+            
+        return session.client("bedrock-runtime")
 
     def _setup_tokenizer(self):
         """Setup tokenizer for chat template formatting"""
@@ -439,143 +463,146 @@ Generate just the user request, nothing else:"""
         # Fallback to first line if no clean line found
         return lines[0].strip().strip('"').strip("'") if lines else "Help me with this"
 
+    def _generate_compound_user_request(self, tools: List[ToolSpec]) -> str:
+        """Generate user request that requires multiple tools"""
+
+        # Define realistic compound scenarios
+        compound_scenarios = {
+            ("climate_control", "window_control"): [
+                "It's getting stuffy and warm in here, can you help me cool down?",
+                "Turn on the AC and crack open the windows a bit",
+                "Set the temperature to 70 and open the driver window halfway"
+            ],
+            ("seat_control", "climate_control"): [
+                "I'm cold and uncomfortable, can you warm me up and adjust my seat?",
+                "Turn on seat heating to medium and set the temperature to 75",
+                "Move my seat back and turn up the heat"
+            ],
+            ("lighting_control", "window_control"): [
+                "It's getting dark and stuffy in here",
+                "Turn on the headlights and open the windows a bit",
+                "I need better visibility and some fresh air"
+            ],
+            ("seat_control", "lighting_control"): [
+                "Adjust my seat position and turn on the reading light",
+                "Move my seat forward and set ambient lighting to blue",
+                "I need to get comfortable and improve the lighting"
+            ],
+            ("drive_mode", "climate_control"): [
+                "Switch to eco mode and turn on the AC",
+                "I want to save fuel but stay cool",
+                "Set eco mode and adjust the temperature to 72"
+            ]
+        }
+
+        # Get tool names
+        tool_names = tuple(sorted([tool.name for tool in tools]))
+
+        # Find matching scenario or create generic one
+        if tool_names in compound_scenarios:
+            return random.choice(compound_scenarios[tool_names])
+        else:
+            # Generic compound request
+            actions = []
+            for tool in tools:
+                if tool.name == "climate_control":
+                    actions.append("adjust the temperature")
+                elif tool.name == "window_control":
+                    actions.append("open the windows")
+                elif tool.name == "seat_control":
+                    actions.append("adjust my seat")
+                elif tool.name == "lighting_control":
+                    actions.append("turn on the lights")
+                elif tool.name == "drive_mode":
+                    actions.append("change the drive mode")
+
+            return f"Please {' and '.join(actions)}"
+
     # ====================================================================
     # Conversation Generation Methods
     # ====================================================================
 
-    def generate_tool_call(self, tool_spec: ToolSpec) -> Dict[str, Any]:
-        """Generate a tool call in Strands format"""
+    def _generate_tool_call_from_request(self, user_request: str, tools: List[ToolSpec]) -> Optional[Dict[str, Any]]:
+        """Generate a tool call based on a user request using an LLM."""
+        tool_spec = tools[0]
+        
+        prompt = f"""You are an AI assistant. Your task is to generate the arguments for a tool call in JSON format based on the user's request and the available tool. The generated JSON must be valid and adhere strictly to the tool's input schema.
 
-        # Generate parameters based on tool spec
-        params = self._generate_parameters(tool_spec)
+Tool:
+{json.dumps(tool_spec.to_dict())}
 
-        return {
-            "toolUse": {
-                "toolUseId": f"call_{uuid.uuid4().hex[:8]}",
-                "name": tool_spec.name,  # Use correct tool name (domain)
-                "input": params,  # Include action parameter
+User request:
+{user_request}
+
+Respond with ONLY the arguments in JSON format."""
+
+        response = self._generate_with_llm(prompt)
+        
+        try:
+            # Find the JSON object in the response
+            match = re.search(r'\{.*\}', response, re.DOTALL)
+            if not match:
+                return None
+
+            arguments = json.loads(match.group(0))
+            
+            return {
+                "toolUse": {
+                    "toolUseId": f"call_{{uuid.uuid4().hex[:8]}}",
+                    "name": tool_spec.name,
+                    "input": arguments,
+                }
             }
-        }
+        except json.JSONDecodeError:
+            return None
 
-    def _generate_parameters(self, tool_spec: ToolSpec) -> Dict[str, Any]:
-        """Generate valid structured parameters for a tool based on actual tool signatures"""
-        params = {}
-        properties = tool_spec.parameters.get("properties", {})
-        required = tool_spec.parameters.get("required", [])
+    def _generate_multiple_tool_calls(self, user_request: str, tools: List[ToolSpec]) -> List[Dict[str, Any]]:
+        """Generate multiple tool calls for a compound request"""
+        tool_calls = []
 
-        # Generate parameters based on tool type
-        if tool_spec.name == "climate_control":
-            params = self._generate_climate_params()
-        elif tool_spec.name == "window_control":
-            params = self._generate_window_params()
-        elif tool_spec.name == "seat_control":
-            params = self._generate_seat_params()
-        elif tool_spec.name == "lighting_control":
-            params = self._generate_lighting_params()
-        elif tool_spec.name == "drive_mode":
-            params = self._generate_drive_mode_params()
+        for tool in tools:
+            # Generate individual tool call for each tool
+            prompt = f"""You are an AI assistant. Generate arguments for the "{tool.name}" tool based on this user request.
+
+Tool:
+{json.dumps(tool.to_dict())}
+
+User request: {user_request}
+
+Extract only the part of the request relevant to this tool and generate appropriate arguments.
+Respond with ONLY the arguments in JSON format."""
+
+            response = self._generate_with_llm(prompt)
+
+            try:
+                # Find the JSON object in the response
+                match = re.search(r'\{.*\}', response, re.DOTALL)
+                if match:
+                    arguments = json.loads(match.group(0))
+
+                    tool_call = {
+                        "toolUse": {
+                            "toolUseId": f"call_{uuid.uuid4().hex[:8]}",
+                            "name": tool.name,
+                            "input": arguments,
+                        }
+                    }
+                    tool_calls.append(tool_call)
+            except json.JSONDecodeError:
+                continue
+
+        return tool_calls if tool_calls else None
+
+    def _format_multi_tool_response(self, tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Format assistant response with multiple tool calls"""
+        return tool_calls
+
+    def _generate_multi_tool_response(self, tool_names: List[str]) -> str:
+        """Generate assistant response after multiple tool executions"""
+        if len(tool_names) == 2:
+            return f"I've completed both actions for you. Your {tool_names[0]} and {tool_names[1]} settings have been adjusted."
         else:
-            # Fallback for other tools - generate based on schema
-            for prop_name in required:
-                params[prop_name] = self._generate_value(properties[prop_name])
-
-        return params
-
-    def _generate_climate_params(self) -> Dict[str, Any]:
-        """Generate realistic climate control parameters"""
-        actions = ["set_temperature", "adjust_temperature", "set_fan_speed", "adjust_fan_speed", "set_mode", "toggle_ac", "toggle_defrost", "turn_off"]
-        action = random.choice(actions)
-        params = {"action": action}
-
-        if action == "set_temperature":
-            params["temperature"] = random.randint(65, 80)
-        elif action == "adjust_temperature":
-            params["temperature_adjustment"] = random.choice([-5, -3, -2, 2, 3, 5])
-        elif action == "set_fan_speed":
-            params["fan_speed"] = random.randint(0, 7)
-        elif action == "adjust_fan_speed":
-            params["fan_adjustment"] = random.choice([-2, -1, 1, 2])
-        elif action == "set_mode":
-            params["mode"] = random.choice(["auto", "heat", "cool", "defrost", "vent"])
-        elif action in ["toggle_ac", "toggle_defrost"]:
-            params["enable"] = random.choice([True, False])
-
-        return params
-
-    def _generate_window_params(self) -> Dict[str, Any]:
-        """Generate realistic window control parameters"""
-        actions = ["open", "close", "set_position", "vent", "express_up", "express_down", "toggle_child_lock"]
-        targets = ["driver", "passenger", "rear_left", "rear_right", "rear", "all", "sunroof"]
-
-        action = random.choice(actions)
-        target = random.choice(targets)
-        params = {"action": action, "target": target}
-
-        if action == "set_position":
-            params["position"] = random.choice([0, 25, 50, 75, 100])
-        elif action == "toggle_child_lock":
-            params["enable"] = random.choice([True, False])
-
-        return params
-
-    def _generate_seat_params(self) -> Dict[str, Any]:
-        """Generate realistic seat control parameters"""
-        actions = ["adjust_position", "set_heating", "set_cooling", "adjust_lumbar", "save_memory", "recall_memory"]
-        seats = ["driver", "passenger"]
-
-        action = random.choice(actions)
-        seat = random.choice(seats)
-        params = {"action": action, "seat": seat}
-
-        if action == "adjust_position":
-            params["position_type"] = random.choice(["forward", "height", "tilt"])
-            params["adjustment"] = random.choice([-15, -10, -5, 5, 10, 15])
-        elif action == "set_heating":
-            params["heating_level"] = random.randint(0, 3)
-        elif action == "set_cooling":
-            params["cooling_level"] = random.randint(0, 3)
-        elif action == "adjust_lumbar":
-            params["lumbar_adjustment"] = random.choice([-3, -2, -1, 1, 2, 3])
-        elif action in ["save_memory", "recall_memory"]:
-            params["memory_slot"] = random.randint(1, 3)
-
-        return params
-
-    def _generate_lighting_params(self) -> Dict[str, Any]:
-        """Generate realistic lighting control parameters"""
-        actions = ["set_headlights", "set_interior", "set_ambient", "set_reading", "toggle_auto"]
-        action = random.choice(actions)
-        params = {"action": action}
-
-        if action == "set_headlights":
-            params["headlight_mode"] = random.choice(["off", "on", "auto", "high_beam"])
-        elif action == "set_interior":
-            params["interior_brightness"] = random.choice([0, 25, 50, 75, 100])
-        elif action == "set_ambient":
-            params["ambient_color"] = random.choice(["white", "blue", "red", "green", "purple", "orange"])
-            params["ambient_brightness"] = random.choice([30, 50, 70, 100])
-        elif action == "set_reading":
-            params["reading_light"] = random.choice(["driver", "passenger", "rear_left", "rear_right", "all"])
-            params["enable"] = random.choice([True, False])
-        elif action == "toggle_auto":
-            params["enable"] = random.choice([True, False])
-
-        return params
-
-    def _generate_drive_mode_params(self) -> Dict[str, Any]:
-        """Generate realistic drive mode parameters"""
-        actions = ["set_mode", "toggle_traction", "toggle_stability", "toggle_lane_assist", "toggle_cruise"]
-        action = random.choice(actions)
-        params = {"action": action}
-
-        if action == "set_mode":
-            params["mode"] = random.choice(["normal", "sport", "eco", "snow"])
-        else:
-            params["enable"] = random.choice([True, False])
-
-        return params
-
-# Deprecated methods removed - no longer needed with structured parameters
+            return f"I've completed all {len(tool_names)} actions as requested. Everything should be set up to your preferences now."
 
     def _generate_value(self, spec: Dict[str, Any]) -> Any:
         """Generate value based on JSON schema specification"""
@@ -609,18 +636,37 @@ Generate just the user request, nothing else:"""
     # ====================================================================
 
     def generate_conversation(
-        self, tools: List[ToolSpec], include_multimodal: bool = False
-    ) -> Dict[str, Any]:
+        self, tools: List[ToolSpec], include_multimodal: bool = False, multi_tool: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """Generate complete conversation with tool calls"""
 
         conversation_id = f"conv_{uuid.uuid4().hex[:12]}"
+        messages = []
+
+        # System message with all available tools
+        messages.append(
+            {
+                "role": "system",
+                "content": "You are an AI assistant with access to various tools. Use them to help users effectively.",
+            }
+        )
+
+        if multi_tool and len(tools) > 1:
+            return self._generate_multi_tool_conversation(conversation_id, tools, include_multimodal)
+        else:
+            return self._generate_single_tool_conversation(conversation_id, tools, include_multimodal)
+
+    def _generate_single_tool_conversation(
+        self, conversation_id: str, tools: List[ToolSpec], include_multimodal: bool
+    ) -> Optional[Dict[str, Any]]:
+        """Generate conversation with single tool call"""
         messages = []
 
         # System message
         messages.append(
             {
                 "role": "system",
-                "content": "You are an AI assistant with access to various tools. Use them to help users effectively.\n\n/no_think",
+                "content": "You are an AI assistant with access to various tools. Use them to help users effectively.",
             }
         )
 
@@ -629,7 +675,10 @@ Generate just the user request, nothing else:"""
         messages.append({"role": "user", "content": user_content})
 
         # Assistant response with tool call
-        tool_call = self.generate_tool_call(tools[0])
+        tool_call = self._generate_tool_call_from_request(user_content, tools)
+        if not tool_call:
+            return None # Could not generate a valid tool call
+
         assistant_response = self._format_assistant_response(tool_call)
         messages.append({"role": "assistant", "content": assistant_response})
 
@@ -640,6 +689,51 @@ Generate just the user request, nothing else:"""
         # Final assistant response
         messages.append(
             {"role": "assistant", "content": self._generate_assistant_response(tools[0].name)}
+        )
+
+        return {
+            "conversation_id": conversation_id,
+            "tools": [tool.to_dict() for tool in tools],
+            "messages": messages,
+        }
+
+    def _generate_multi_tool_conversation(
+        self, conversation_id: str, tools: List[ToolSpec], include_multimodal: bool = False
+    ) -> Optional[Dict[str, Any]]:
+        """Generate conversation with multiple tool calls"""
+        # Note: include_multimodal not used for multi-tool conversations for simplicity
+        messages = []
+
+        # System message
+        messages.append(
+            {
+                "role": "system",
+                "content": "You are an AI assistant with access to various tools. Use them to help users effectively.",
+            }
+        )
+
+        # Generate compound user request
+        user_content = self._generate_compound_user_request(tools)
+        messages.append({"role": "user", "content": user_content})
+
+        # Generate multiple tool calls
+        tool_calls = self._generate_multiple_tool_calls(user_content, tools)
+        if not tool_calls:
+            return None
+
+        # Assistant response with multiple tool calls
+        assistant_response = self._format_multi_tool_response(tool_calls)
+        messages.append({"role": "assistant", "content": assistant_response})
+
+        # Multiple tool results
+        for tool_call in tool_calls:
+            tool_result = self._generate_tool_result(tool_call["toolUse"]["toolUseId"])
+            messages.append(tool_result)
+
+        # Final assistant response acknowledging all actions
+        tool_names = [tc["toolUse"]["name"] for tc in tool_calls]
+        messages.append(
+            {"role": "assistant", "content": self._generate_multi_tool_response(tool_names)}
         )
 
         return {
@@ -683,7 +777,7 @@ Generate just the user request, nothing else:"""
 
     def _format_assistant_response(self, tool_call: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Format assistant response with tool call"""
-        return [{"text": "I'll help you with that."}, tool_call]
+        return [tool_call]
 
     def _generate_tool_result(self, tool_use_id: str) -> Dict[str, Any]:
         """Generate tool execution result"""
@@ -702,7 +796,7 @@ Generate just the user request, nothing else:"""
 
     def _generate_assistant_response(self, tool_name: str) -> str:
         """Generate assistant response after tool execution"""
-        prompt = f"""Generate a brief response that an AI vehicle assistant would give after successfully using the "{tool_name}" tool.
+        prompt = f"""Generate a brief response that an AI vehicle assistant would give after successfully using the \"{tool_name}\" tool.
 
 Requirements:
 - Keep it concise (1-2 sentences)
@@ -742,46 +836,30 @@ Generate just the response:"""
         # Convert Strands format to standard chat format
         messages = []
 
-        # Add system message with tools
-        tools_info = []
-        for tool in conversation.get('tools', []):
-            tool_desc = f"{tool['name']}: {tool['description']}"
-            if 'inputSchema' in tool and 'json' in tool['inputSchema']:
-                schema = tool['inputSchema']['json']
-                if 'properties' in schema:
-                    params = []
-                    for param, spec in schema['properties'].items():
-                        param_desc = f"{param} ({spec.get('type', 'any')})"
-                        if 'description' in spec:
-                            param_desc += f": {spec['description']}"
-                        params.append(param_desc)
-                    tool_desc += f" - Parameters: {', '.join(params)}"
-            tools_info.append(tool_desc)
-
-        system_content = "You are a helpful AI assistant with access to these specific vehicle control tools:\n\n- climate_control: Control temperature, fan speed, AC (action, temperature, fan_speed, mode, enable)\n- window_control: Control windows and sunroof (action, target, position, enable)\n- seat_control: Control seat position and heating (action, seat, position, heating_level, memory_slot)\n- lighting_control: Control headlights and ambient lighting (action, light_type, brightness, ambient_color)\n- drive_mode: Control driving modes (action, mode, toggle)\n\nUse the exact tool names above. Respond with: <tool_call>{\"name\": \"tool_name\", \"arguments\": {\"action\": \"action_name\", \"param\": \"value\"}}</tool_call>\n\n/no_think"
-        messages.append({"role": "system", "content": system_content})
-
         # Process conversation messages
         for msg in conversation.get('messages', []):
             if msg['role'] == 'system':
-                continue  # Skip system messages as we already added our own
-
+                messages.append(msg)  # Keep original system message
             elif msg['role'] == 'user':
                 content = self._extract_user_content(msg)
                 if content:
                     messages.append({"role": "user", "content": content})
-
             elif msg['role'] == 'assistant':
                 content = self._extract_assistant_content(msg)
                 if content:
                     messages.append({"role": "assistant", "content": content})
 
+        # Extract tools to be passed to the template
+        tools = conversation.get('tools', [])
+
         # Apply chat template
         try:
             formatted = self.tokenizer.apply_chat_template(
                 messages,
+                tools=tools,
                 tokenize=False,
-                add_generation_prompt=False
+                add_generation_prompt=True,
+                enable_thinking=False
             )
             return formatted
         except Exception as e:
@@ -863,7 +941,9 @@ Generate just the response:"""
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         with open(output_file, "w") as f:
-            for i in range(num_examples):
+            generated_count = 0
+            i = 0
+            while generated_count < num_examples:
                 # Add delay between individual requests to prevent rate limiting
                 if i > 0:
                     time.sleep(RATE_LIMIT_DELAY)
@@ -874,12 +954,27 @@ Generate just the response:"""
                     time.sleep(BATCH_DELAY)
                 
                 try:
-                    # Select random tools (ONLY PRODUCTION TOOLS)
-                    num_tools = random.randint(1, 3)
-                    tools = self.tool_registry.get_random_tools(num_tools)
+                    # Mix single and multi-tool conversations (70% single, 30% multi)
+                    use_multi_tool = random.random() < 0.3
+
+                    if use_multi_tool:
+                        # Select 2-3 tools for multi-tool conversation
+                        num_tools = random.choice([2, 2, 3])  # Favor 2 tools
+                        tools = self.tool_registry.get_random_tools(num_tools)
+                    else:
+                        # Select single tool
+                        tools = self.tool_registry.get_random_tools(1)
 
                     # Generate conversation (NO MULTIMODAL for cleaner training)
-                    conversation = self.generate_conversation(tools, include_multimodal=False)
+                    conversation = self.generate_conversation(
+                        tools,
+                        include_multimodal=False,
+                        multi_tool=use_multi_tool
+                    )
+                    
+                    if conversation is None:
+                        print(f"Skipping example {i+1} due to generation failure.")
+                        continue
 
                     if format_for_training:
                         # Convert to training format
@@ -889,13 +984,16 @@ Generate just the response:"""
                         # Keep original format
                         f.write(json.dumps(conversation) + "\n")
 
-                    if (i + 1) % 10 == 0:
-                        print(f"Generated {i + 1}/{num_examples} examples")
+                    generated_count += 1
+                    if generated_count % 10 == 0:
+                        print(f"Generated {generated_count}/{num_examples} examples")
                         
                 except Exception as e:
                     print(f"Error generating example {i + 1}: {e}")
                     # Continue with next example even if one fails
                     continue
+                finally:
+                    i += 1
 
         print(f"Dataset saved to {output_file}")
 
@@ -904,7 +1002,10 @@ def main():
     """Generate training and test datasets with structured parameters and chat templates"""
 
     # Initialize generator with default model
-    generator = DataGenerator()
+    generator = DataGenerator(
+        aws_profile_name=os.getenv("AWS_PROFILE"),
+        aws_region=os.getenv("AWS_REGION")
+    )
 
     print("🚀 STRUCTURED PARAMETER TOOL CALLING DATASET GENERATOR")
     print("=" * 60)
@@ -928,7 +1029,7 @@ def main():
     # Generate training data
     print("Generating training dataset...")
     generator.generate_dataset(
-        num_examples=500,
+        num_examples=20,
         output_path="data/train_structured.jsonl",
         format_for_training=True
     )
@@ -936,7 +1037,7 @@ def main():
     # Generate test data
     print("\nGenerating test dataset...")
     generator.generate_dataset(
-        num_examples=100,
+        num_examples=10,
         output_path="data/test_structured.jsonl",
         format_for_training=True
     )
@@ -944,14 +1045,17 @@ def main():
     print("\n🎉 DATASETS GENERATED SUCCESSFULLY!")
     print("=" * 60)
     print("📁 Files created:")
-    print("  - data/train_structured.jsonl (500 examples)")
-    print("  - data/test_structured.jsonl (100 examples)")
+    print("  - data/train_structured.jsonl (20 examples)")
+    print("  - data/test_structured.jsonl (10 examples)")
     print()
     print("🔧 Format improvements:")
     print("  ✅ Structured parameters instead of natural language commands")
     print("  ✅ Proper chat template formatting when available")
     print("  ✅ Tool calls with JSON parameters")
     print("  ✅ Better validation and error handling")
+    print("  ✅ Multi-tool conversations (30% of examples)")
+    print("  ✅ Compound user requests requiring multiple tools")
+    print("  ✅ Sequential tool call handling")
     print()
     print("🚀 Ready for fine-tuning!")
 
