@@ -36,7 +36,7 @@ except ImportError:
 # Configuration constants
 DEFAULT_MODEL_ID = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
 # DEFAULT_MODEL_ID = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
-DEFAULT_REGION = "us-west-2"
+DEFAULT_REGION = os.getenv("AWS_REGION", "us-west-2")
 DEFAULT_MAX_TOKENS = 1000
 DEFAULT_TEMPERATURE = 0.7
 

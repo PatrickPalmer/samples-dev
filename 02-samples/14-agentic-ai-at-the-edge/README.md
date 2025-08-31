@@ -103,7 +103,7 @@ flowchart LR
 ### 1. Development Mode
 Direct execution on developer machine with full capabilities:
 ```bash
-uv run main.py
+python main.py
 ```
 - **Audio**: Direct microphone access via sounddevice
 - **Models**: Dynamic selection between local/cloud
@@ -123,7 +123,7 @@ docker run -v $(pwd)/audio_exchange:/app/audio_exchange agentic-ai-edge
 ### 3. Service/API Mode
 RESTful service for integration:
 ```bash
-ENABLE_API=true uv run main.py
+ENABLE_API=true python main.py
 # or
 docker run -e ENABLE_API=true -p 8000:8000 agentic-ai-edge
 ```
@@ -137,8 +137,9 @@ docker run -e ENABLE_API=true -p 8000:8000 agentic-ai-edge
 ### Complete Setup (5 minutes)
 
 ```bash
-# 1. Install uv package manager
-curl -LsSf https://astral.sh/uv/install.sh | sh
+# 1. Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # 2. Install Homebrew (if not already installed)
 curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | bash
@@ -152,27 +153,27 @@ brew install llama.cpp
 # 5. Clone and setup the project
 git clone <repository-url>
 cd 02-samples/14-agentic-ai-at-the-edge
-uv pip install -e .
+pip install -e .
 
 # 6. Download models
 mkdir -p models && cd models
 # Download Qwen3-1.7B model (optimized GGUF from Unsloth)
-uv run hf download unsloth/Qwen3-1.7B-GGUF Qwen3-1.7B-Q4_K_M.gguf --local-dir .
+python -m huggingface_hub download unsloth/Qwen3-1.7B-GGUF Qwen3-1.7B-Q4_K_M.gguf --local-dir .
 # Download Whisper model for speech recognition
-uv run hf download ggerganov/whisper.cpp ggml-base.bin --local-dir .
+python -m huggingface_hub download ggerganov/whisper.cpp ggml-base.bin --local-dir .
 cd ..
 
 # 7. Start llama-server (in one terminal)
 llama-server -m models/Qwen3-1.7B-Q4_K_M.gguf --host 0.0.0.0 --port 8080 -c 32768 -ngl 50 --chat-template qwen3
 
 # 8. Run the assistant (in another terminal)
-uv run main.py
+python main.py
 ```
 
 ### Prerequisites
 
 1. Python 3.10 or higher
-2. uv package manager: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+2. pip package manager (included with Python)
 3. llama.cpp with server support (see installation below)
 4. FFmpeg with Whisper support (compiled in container)
 5. (Optional) AWS credentials for Bedrock cloud model access
@@ -245,14 +246,18 @@ sudo chown -R $(whoami) /home/linuxbrew/.linuxbrew/
 ### Installation
 
 ```bash
-# Install dependencies using uv
-uv pip install -e .
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -e .
 
 # Run in development mode
-uv run main.py
+python main.py
 
 # Or run in API mode
-ENABLE_API=true uv run main.py
+ENABLE_API=true python main.py
 ```
 
 ### Voice-Enabled Setup (Recommended)
@@ -271,8 +276,8 @@ Voice processing is handled separately by FFmpeg with integrated Whisper for opt
 ```bash
 mkdir -p models && cd models
 # Download optimized Q4_K_M variant from Unsloth
-uv run hf download unsloth/Qwen3-1.7B-GGUF Qwen3-1.7B-Q4_K_M.gguf --local-dir .
-uv run hf download ggerganov/whisper.cpp ggml-base.bin --local-dir .
+python -m huggingface_hub download unsloth/Qwen3-1.7B-GGUF Qwen3-1.7B-Q4_K_M.gguf --local-dir .
+python -m huggingface_hub download ggerganov/whisper.cpp ggml-base.bin --local-dir .
 ```
 
 2. **Start llama-server**:
@@ -301,7 +306,7 @@ curl http://localhost:8080/health
 
 4. **Run the assistant**:
 ```bash
-uv run main.py
+python main.py
 ```
 
 ### Server Parameters Explained
@@ -397,7 +402,7 @@ The system uses **local model analysis** to intelligently classify query complex
 
 ```bash
 # Uses local LLM to analyze query complexity and select appropriate model
-uv run main.py
+python main.py
 ```
 
 **How it works**:
@@ -413,7 +418,7 @@ uv run main.py
 aws sts get-caller-identity
 
 # Run the assistant and try a complex query
-uv run main.py
+python main.py
 # Try: "Analyze the economic implications of renewable energy adoption"
 ```
 
@@ -439,7 +444,7 @@ USER: voice
 #### Container Mode
 ```bash
 # Host machine:
-uv run python -m src.utils.audio_cli record --duration 10
+python -m src.utils.audio_cli record --duration 10
 
 # In container:
 USER: voice
@@ -449,7 +454,7 @@ USER: voice
 #### API Mode
 ```bash
 # Client application:
-uv run python -m src.utils.audio_cli api --duration 10 --url http://localhost:8000/chat
+python -m src.utils.audio_cli api --duration 10 --url http://localhost:8000/chat
 # Or integrate with your application using base64 audio in JSON
 ```
 
@@ -533,7 +538,7 @@ flowchart TD
 
 ```bash
 cd tests
-uv run python test_all.py
+python test_all.py
 ```
 
 ## Architectural Summary
@@ -551,13 +556,13 @@ This project demonstrates that sophisticated AI systems don't require separate c
 # The same code runs in all these scenarios:
 
 # Developer's laptop
-$ uv run main.py
+$ python main.py
 
 # Automotive edge device
 $ docker run -e DEPLOYMENT_TARGET=automotive ...
 
 # Cloud API service
-$ ENABLE_API=true uv run main.py
+$ ENABLE_API=true python main.py
 
 # Each automatically adapts its behavior to the environment
 ```
